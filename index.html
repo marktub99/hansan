@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#3694d2">
 <title>한산지도</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   :root {
-    --ink: #1c2420; --sub: #5d6a63; --line: #dfe5e1; --bg: #f5f7f5; --card: #fff;
-    --accent: #1f6f54; --accent-soft: #e3f1eb;
+    --ink: #212121; --sub: #6a6a6a; --line: #e4e7ea; --bg: #f6f6f6; --card: #fff;
+    --accent: #2a7ab8; --accent-soft: #e7f3fb; --sky: #3694d2;
     --c0: #2f9e62; --c1: #d9a400; --c2: #e8782a; --c3: #d23b3b; --cn: #a9b2ad;
   }
   * { box-sizing: border-box; }
@@ -20,10 +21,10 @@
     -webkit-text-size-adjust: 100%;
   }
   button, select { font: inherit; color: inherit; }
-  header { padding: 10px 14px 8px; background: var(--card); border-bottom: 1px solid var(--line); }
+  header { padding: 10px 14px 8px; background: var(--card); border-bottom: 1px solid var(--line); border-top: 3px solid var(--sky); }
   .top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   h1 { font-size: 18px; margin: 0; letter-spacing: -0.02em; }
-  #home { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; color: inherit; cursor: pointer; }
+  #home { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; color: var(--accent); cursor: pointer; }
   #updated { font-size: 12px; color: var(--sub); }
   .row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
   .row.scroll { overflow-x: auto; scrollbar-width: none; margin-right: -14px; padding-right: 14px; }
@@ -41,11 +42,11 @@
   }
   .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
   .label { flex: none; font-size: 12px; color: var(--sub); width: 34px; }
-  #map { height: 44vh; min-height: 260px; background: #e8ece9; z-index: 0; }
+  #map { height: 44vh; min-height: 260px; background: #eaeef1; z-index: 0; }
   #mapwrap { position: relative; }
   #here {
     position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 500;
-    height: 38px; padding: 0 14px; border-radius: 19px; border: 0; background: var(--ink); color: #fff;
+    height: 38px; padding: 0 14px; border-radius: 19px; border: 0; background: var(--accent); color: #fff;
     font-weight: 600; font-size: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.25); cursor: pointer;
   }
   .legend {
@@ -73,7 +74,7 @@
   .spark i.sel { opacity: 1; outline: 1.5px solid var(--ink); outline-offset: 0; }
   .best { grid-column: 1 / -1; font-size: 12.5px; color: var(--sub); }
   .best b { color: var(--ink); }
-  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #eef1ef; color: var(--sub); margin-left: 4px; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #eef1f4; color: var(--sub); margin-left: 4px; }
   .empty, .note { color: var(--sub); font-size: 13px; padding: 14px 4px; }
   .note { padding: 16px 0 0; border-top: 1px solid var(--line); margin-top: 16px; line-height: 1.6; }
   .pop { font-size: 13px; }
@@ -102,7 +103,7 @@
   #anchor { font-size: 12.5px; color: var(--sub); margin-top: 6px; display: none; }
   #anchor b { color: var(--ink); }
   #detail {
-    display: none; background: var(--card); border: 1.5px solid var(--ink); border-radius: 12px;
+    display: none; background: var(--card); border: 1.5px solid var(--sky); border-radius: 12px;
     padding: 12px; margin-bottom: 12px; position: relative;
   }
   #detail .spark { height: 48px; margin: 8px 0 2px; }
@@ -568,10 +569,10 @@
   L.control.zoom({ position: 'bottomright' }).addTo(map);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
-  radiusCircle = L.circle([state.lat, state.lng], { radius: 20000, color: '#1f6f54', weight: 1.5, fillColor: '#1f6f54', fillOpacity: 0.05, interactive: false }).addTo(map);
+  radiusCircle = L.circle([state.lat, state.lng], { radius: 20000, color: '#3694d2', weight: 1.5, fillColor: '#3694d2', fillOpacity: 0.05, interactive: false }).addTo(map);
   layer = L.layerGroup().addTo(map);
-  ring = L.circleMarker([state.lat, state.lng], { radius: 14, color: '#1c2420', weight: 3, fill: false, opacity: 0, interactive: false }).addTo(map);
-  centerMark = L.circleMarker([state.lat, state.lng], { radius: 6, color: '#fff', weight: 3, fillColor: '#1c2420', fillOpacity: 1, interactive: false }).addTo(map);
+  ring = L.circleMarker([state.lat, state.lng], { radius: 14, color: '#212121', weight: 3, fill: false, opacity: 0, interactive: false }).addTo(map);
+  centerMark = L.circleMarker([state.lat, state.lng], { radius: 6, color: '#fff', weight: 3, fillColor: '#2a7ab8', fillOpacity: 1, interactive: false }).addTo(map);
 
   fetch('data.json?t=' + Date.now()).then(function (r) {
     if (!r.ok) throw new Error(r.status);

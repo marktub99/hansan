@@ -56,9 +56,11 @@
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: 0; }
   main { padding: 10px 14px 40px; }
   .bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
-  #count { font-size: 13px; color: var(--sub); }
+  #count { font-size: 13px; color: var(--sub); min-width: 0; }
+  .seg { flex: none; }
   .seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--card); }
-  .seg button { border: 0; background: none; height: 34px; padding: 0 12px; font-size: 13px; color: var(--sub); cursor: pointer; }
+  .seg button { border: 0; background: none; height: 34px; padding: 0 10px; font-size: 13px; white-space: nowrap; color: var(--sub); cursor: pointer; }
+  .seg button[hidden] { display: none; }
   .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
   ul { list-style: none; margin: 0; padding: 0; }
   li.item {
@@ -143,8 +145,8 @@
   <div class="row">
     <button class="btn primary" id="locate" type="button">내 위치</button>
     <select id="radius" aria-label="반경">
-      <option value="5">반경 5km</option><option value="10">반경 10km</option>
-      <option value="20" selected>반경 20km</option><option value="50">반경 50km</option>
+      <option value="5">반경 5km</option><option value="10" selected>반경 10km</option>
+      <option value="20">반경 20km</option><option value="50">반경 50km</option>
       <option value="100">반경 100km</option><option value="0">전국</option>
     </select>
     <select id="day" aria-label="날짜"></select>
@@ -175,6 +177,7 @@
   <div class="bar">
     <span id="count"></span>
     <div class="seg" role="group" aria-label="정렬">
+      <button type="button" data-sort="pop" aria-pressed="false" id="sortPop" hidden>인기순</button>
       <button type="button" data-sort="dist" aria-pressed="true">가까운 순</button>
       <button type="button" data-sort="rate" aria-pressed="false">한산한 순</button>
     </div>
@@ -200,7 +203,7 @@
   var GRAY = '#a9b2ad';
   var LIST_MAX = 80, MARKER_MAX = 2500, POP_MAX = 30;
 
-  var state = { lat: 37.5665, lng: 126.9780, radius: 20, day: 0, sort: 'dist',
+  var state = { lat: 37.5665, lng: 126.9780, radius: 10, day: 0, sort: 'dist',
                 io: {}, grp: {}, level: 0, pop: false, sel: -1, keep: false, label: '' };
   var data = null, map, layer, centerMark, radiusCircle, ring, markers = {}, kakaoKey = '', kakaoReady = null;
 
@@ -530,6 +533,8 @@
     }
     out.sort(state.sort === 'rate'
       ? function (a, b) { return (a.v == null ? 999 : a.v) - (b.v == null ? 999 : b.v) || a.d - b.d; }
+      : state.sort === 'pop'
+      ? function (a, b) { return (a.s[10] > 0 ? a.s[10] : 999) - (b.s[10] > 0 ? b.s[10] : 999) || a.d - b.d; }
       : function (a, b) { return a.d - b.d; });
     return out;
   }
@@ -554,7 +559,7 @@
     radiusCircle.setStyle({ opacity: state.radius ? 0.7 : 0, fillOpacity: state.radius ? 0.05 : 0 });
 
     document.getElementById('count').textContent =
-      rows.length + '곳' + (rows.length > LIST_MAX ? ' (목록은 ' + LIST_MAX + '곳까지)' : '');
+      rows.length + '곳' + (rows.length > LIST_MAX ? ' (목록 ' + LIST_MAX + '곳)' : '');
     var ul = document.getElementById('list'), h = '';
     rows.slice(0, LIST_MAX).forEach(function (o) {
       var s = o.s, bi = bestDay(s[7]), wi = weekendBest(s[7]);
@@ -614,6 +619,7 @@
         b.setAttribute('aria-pressed', state.io[k] ? 'true' : 'false');
       });
     if (d.stats && d.stats.ranked) {
+      document.getElementById('sortPop').hidden = false;
       chips('ioRow', [{ key: 'pop', label: '인기 장소만' }], {}, function (k, b) {
         state.pop = !state.pop; b.setAttribute('aria-pressed', state.pop ? 'true' : 'false');
       });

@@ -75,12 +75,44 @@
   .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #eef1ef; color: var(--sub); margin-left: 4px; }
   .empty, .note { color: var(--sub); font-size: 13px; padding: 14px 4px; }
   .note { padding: 16px 0 0; border-top: 1px solid var(--line); margin-top: 16px; line-height: 1.6; }
-  .pop { font-size: 13px; min-width: 210px; }
+  .pop { font-size: 13px; }
   .pop .name { font-size: 15px; }
   .pop .spark { height: 44px; margin: 8px 0 2px; }
   .pop .axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--sub); }
   .pop a { color: var(--accent); font-weight: 600; text-decoration: none; margin-right: 12px; }
   .leaflet-popup-content { margin: 12px 14px; }
+  .search { position: relative; }
+  .search input {
+    flex: 1; height: 40px; border: 1px solid var(--line); border-radius: 10px; padding: 0 12px;
+    font: inherit; min-width: 0; background: var(--card); color: var(--ink);
+  }
+  #results {
+    display: none; position: absolute; left: 0; right: 0; top: 46px; z-index: 1200; background: var(--card);
+    border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.15);
+    max-height: 52vh; overflow-y: auto;
+  }
+  #results button {
+    display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line);
+    background: none; padding: 10px 12px; cursor: pointer;
+  }
+  #results button:last-child { border-bottom: 0; }
+  #results .meta, #results .src { display: block; }
+  #results .src { padding: 8px 12px; font-size: 11px; color: var(--sub); }
+  #anchor { font-size: 12.5px; color: var(--sub); margin-top: 6px; display: none; }
+  #anchor b { color: var(--ink); }
+  #detail {
+    display: none; background: var(--card); border: 1.5px solid var(--ink); border-radius: 12px;
+    padding: 12px; margin-bottom: 12px; position: relative;
+  }
+  #detail .spark { height: 48px; margin: 8px 0 2px; }
+  #detail .axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--sub); }
+  #detail .close { position: absolute; right: 6px; top: 4px; border: 0; background: none; font-size: 22px; line-height: 1; padding: 6px 8px; color: var(--sub); cursor: pointer; }
+  #detail a.out { color: var(--accent); font-weight: 600; text-decoration: none; margin-right: 14px; }
+  #detail h3 { font-size: 13px; margin: 12px 0 4px; color: var(--sub); font-weight: 600; }
+  .alt { display: flex; justify-content: space-between; align-items: center; width: 100%; border: 0; border-top: 1px solid var(--line);
+    background: none; padding: 8px 0; text-align: left; cursor: pointer; gap: 8px; }
+  .alt b { font-variant-numeric: tabular-nums; font-size: 16px; }
+  .facts { font-size: 13px; margin: 6px 0 10px; line-height: 1.7; }
   #msg { display: none; background: #fff4d6; color: #6b5200; font-size: 13px; padding: 8px 14px; }
   @media (min-width: 900px) {
     body { display: grid; grid-template-columns: 420px 1fr; grid-template-rows: auto 1fr; height: 100vh; }
@@ -93,6 +125,12 @@
 <body>
 <header>
   <div class="top"><h1>한산지도</h1><span id="updated">불러오는 중</span></div>
+  <form class="row search" id="searchForm" autocomplete="off">
+    <input id="q" type="search" placeholder="목적지 검색 (예: 속초해수욕장, 호텔 이름)" aria-label="목적지 검색" enterkeyhint="search">
+    <button class="btn" type="submit">검색</button>
+    <div id="results" role="listbox"></div>
+  </form>
+  <div id="anchor"></div>
   <div class="row">
     <button class="btn primary" id="locate" type="button">내 위치</button>
     <select id="radius" aria-label="반경">
@@ -102,6 +140,7 @@
     </select>
     <select id="day" aria-label="날짜"></select>
   </div>
+  <div class="row scroll" id="dayRow"><span class="label">주말</span></div>
   <div class="row scroll" id="ioRow"><span class="label">장소</span></div>
   <div class="row scroll" id="lvRow"><span class="label">혼잡</span></div>
   <div class="row scroll" id="grpRow"><span class="label">유형</span></div>
@@ -118,6 +157,7 @@
   <button id="here" type="button">이 화면 중심으로 검색</button>
 </div>
 <main>
+  <div id="detail"></div>
   <div class="bar">
     <span id="count"></span>
     <div class="seg" role="group" aria-label="정렬">
@@ -146,8 +186,8 @@
   var LIST_MAX = 80, MARKER_MAX = 2500;
 
   var state = { lat: 37.5665, lng: 126.9780, radius: 20, day: 0, sort: 'dist',
-                io: {}, grp: {}, level: 0 };
-  var data = null, map, layer, centerMark, radiusCircle, markers = {};
+                io: {}, grp: {}, level: 0, sel: -1, keep: false, label: '' };
+  var data = null, map, layer, centerMark, radiusCircle, ring, markers = {}, kakaoKey = '', kakaoReady = null;
 
   function store(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
   function load(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
@@ -159,7 +199,7 @@
     var R = 6371, p = Math.PI / 180, x = (d - b) * p * Math.cos((a + c) * p / 2), y = (c - a) * p;
     return Math.sqrt(x * x + y * y) * R;
   }
-  function dayLabel(iso, i) {
+  function dayLabel(iso) {
     var d = new Date(iso + 'T00:00:00');
     var s = (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')';
     return iso === todayIso() ? '오늘 ' + s : s;
@@ -169,6 +209,102 @@
     return n.getFullYear() + '-' + p(n.getMonth() + 1) + '-' + p(n.getDate());
   }
   function say(t) { var m = document.getElementById('msg'); m.textContent = t || ''; m.style.display = t ? 'block' : 'none'; }
+
+  var dayChips = [];
+  function buildDayChips(sel) {
+    var row = document.getElementById('dayRow'), seen = { 6: 0, 0: 0 }, t = todayIso();
+    data.days.forEach(function (iso, i) {
+      if (iso < t) return;
+      var wd = new Date(iso + 'T00:00:00').getDay();
+      if (wd !== 6 && wd !== 0) return;
+      if (seen[wd] >= 2) return;
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'chip';
+      b.textContent = (seen[wd] ? '다음 ' : '이번 ') + WD[wd] + ' ' + (+iso.slice(5, 7)) + '/' + (+iso.slice(8));
+      seen[wd]++;
+      b.addEventListener('click', function () { state.day = i; sel.value = String(i); syncDayChips(); render(); });
+      row.appendChild(b); dayChips.push({ b: b, i: i });
+    });
+    syncDayChips();
+  }
+  function syncDayChips() {
+    dayChips.forEach(function (x) { x.b.setAttribute('aria-pressed', x.i === state.day ? 'true' : 'false'); });
+  }
+
+  // ----- 목적지 검색: 카카오 키가 있으면 카카오, 없으면 OpenStreetMap -----
+  function loadKakao() {
+    if (kakaoReady) return kakaoReady;
+    kakaoReady = new Promise(function (ok, fail) {
+      var sc = document.createElement('script');
+      sc.src = 'https://dapi.kakao.com/v2/maps/sdk.js?appkey=' + encodeURIComponent(kakaoKey) + '&libraries=services&autoload=false';
+      sc.onload = function () {
+        try { window.kakao.maps.load(function () { ok(new window.kakao.maps.services.Places()); }); } catch (e) { fail(e); }
+      };
+      sc.onerror = function () { kakaoReady = null; fail(new Error('kakao')); };
+      document.head.appendChild(sc);
+    });
+    return kakaoReady;
+  }
+  function searchKakao(q) {
+    return loadKakao().then(function (ps) {
+      return new Promise(function (ok, fail) {
+        ps.keywordSearch(q, function (res, status) {
+          var S = window.kakao.maps.services.Status;
+          if (status === S.OK) ok(res.map(function (p) {
+            return { name: p.place_name, addr: p.road_address_name || p.address_name || '', lat: +p.y, lng: +p.x };
+          }));
+          else if (status === S.ZERO_RESULT) ok([]);
+          else fail(new Error('kakao'));
+        }, { size: 10 });
+      });
+    });
+  }
+  function searchOsm(q) {
+    return fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=kr&limit=8&accept-language=ko&q=' + encodeURIComponent(q))
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (a) {
+        return a.map(function (p) {
+          var parts = String(p.display_name || '').split(', ');
+          return { name: p.name || parts[0], addr: parts.slice(1, 4).reverse().join(' '), lat: +p.lat, lng: +p.lon };
+        });
+      });
+  }
+  function showResults(list, src) {
+    var box = document.getElementById('results'), h = '';
+    list.forEach(function (p, i) {
+      h += '<button type="button" data-i="' + i + '"><span class="name">' + esc(p.name) + '</span><span class="meta">' + esc(p.addr) + '</span></button>';
+    });
+    box.innerHTML = (h || '<span class="src">검색 결과가 없습니다. 다른 이름이나 주소로 찾아보세요.</span>') +
+      '<span class="src">장소 검색: ' + src + '</span>';
+    box.style.display = 'block';
+    box.onclick = function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      var p = list[+b.getAttribute('data-i')];
+      box.style.display = 'none'; document.getElementById('q').blur();
+      closeSpot();
+      setCenter(p.lat, p.lng, true, p.name, false);   // 검색 결과 좌표는 저장하지 않는다
+    };
+  }
+  function doSearch(q) {
+    var box = document.getElementById('results');
+    box.innerHTML = '<span class="src">검색 중…</span>'; box.style.display = 'block';
+    var run = kakaoKey
+      ? searchKakao(q).then(function (r) { return { r: r, src: '카카오' }; })
+          .catch(function () { return searchOsm(q).then(function (r) { return { r: r, src: 'OpenStreetMap (카카오 연결 실패)' }; }); })
+      : searchOsm(q).then(function (r) { return { r: r, src: 'OpenStreetMap' }; });
+    run.then(function (x) { showResults(x.r, x.src); })
+      .catch(function () { box.innerHTML = '<span class="src">검색에 실패했습니다. 잠시 뒤 다시 시도하세요.</span>'; });
+  }
+  document.getElementById('searchForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var q = document.getElementById('q').value.trim();
+    if (q.length >= 2) doSearch(q);
+  });
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('#searchForm')) document.getElementById('results').style.display = 'none';
+  });
+  fetch('kakao-key.txt?t=' + Date.now()).then(function (r) { return r.ok ? r.text() : ''; })
+    .then(function (t) { t = t.trim(); if (/^[0-9a-f]{20,40}$/i.test(t)) kakaoKey = t; }).catch(function () {});
 
   function chips(rowId, items, bag, onChange) {
     var row = document.getElementById(rowId);
@@ -199,24 +335,71 @@
     return bi;
   }
 
-  function popupHtml(s) {
-    var r = s[7], v = r[state.day], bi = bestDay(r);
+  function weekendBest(r) {
+    var bi = -1;
+    for (var i = 0; i < r.length; i++) {
+      var wd = new Date(data.days[i] + 'T00:00:00').getDay();
+      if ((wd === 0 || wd === 6) && r[i] != null && (bi < 0 || r[i] < r[bi])) bi = i;
+    }
+    return bi;
+  }
+  function alternatives(idx) {
+    var s = data.spots[idx], v = s[7][state.day], out = [];
+    if (v == null) return out;
+    for (var i = 0; i < data.spots.length; i++) {
+      var t = data.spots[i];
+      if (i === idx || t[6] || t[4] !== s[4]) continue;
+      var tv = t[7][state.day];
+      if (tv == null || tv > v - 10) continue;
+      var d = km(s[2], s[3], t[2], t[3]);
+      if (d > 30) continue;
+      out.push({ i: i, v: tv, d: d });
+    }
+    out.sort(function (a, b) { return a.v - b.v || a.d - b.d; });
+    return out.slice(0, 3);
+  }
+  function detailHtml(idx) {
+    var s = data.spots[idx], r = s[7], v = r[state.day], bi = bestDay(r), wi = weekendBest(r);
     var q = encodeURIComponent(s[0]);
-    var h = '<div class="pop"><div class="name">' + esc(s[0]) + '</div>' +
+    var h = '<button class="close" type="button" aria-label="닫기">×</button>' +
+      '<div class="name" style="padding-right:28px">' + esc(s[0]) + '</div>' +
       '<div class="meta">' + esc(s[1]) + ' · ' + esc(data.groups[s[4]]) + ' · ' + IO[s[5]] +
       (s[6] ? ' · 위치 대략' : '') + '</div>' +
-      '<div style="margin-top:6px"><b style="color:' + color(v) + '">' + (v == null ? '-' : v) + '</b> ' + word(v) +
-      ' <span class="meta">' + dayLabel(data.days[state.day], state.day) + '</span></div>' +
+      '<div style="margin-top:8px"><b style="font-size:22px;color:' + color(v) + '">' + (v == null ? '-' : v) + '</b> ' + word(v) +
+      ' <span class="meta">' + dayLabel(data.days[state.day]) + '</span></div>' +
       spark(r, state.day) +
-      '<div class="axis"><span>' + dayLabel(data.days[0], 1) + '</span><span>' +
-      dayLabel(data.days[data.days.length - 1], 1) + '</span></div>';
-    if (bi >= 0) h += '<div class="meta" style="margin:6px 0 8px">가장 한산한 날 <b>' +
-      dayLabel(data.days[bi], bi) + '</b> ' + r[bi] + '</div>';
+      '<div class="axis"><span>' + dayLabel(data.days[0]) + '</span><span>' +
+      dayLabel(data.days[data.days.length - 1]) + '</span></div><div class="facts">';
+    if (bi >= 0) h += '가장 한산한 날 <b>' + dayLabel(data.days[bi]) + '</b> ' + r[bi] + '<br>';
+    if (wi >= 0) h += '주말 중 가장 한산 <b>' + dayLabel(data.days[wi]) + '</b> ' + r[wi];
+    h += '</div>';
     h += s[6]
-      ? '<a target="_blank" rel="noopener" href="https://map.kakao.com/link/search/' + q + '">카카오맵</a>'
-      : '<a target="_blank" rel="noopener" href="https://map.kakao.com/link/map/' + q + ',' + s[2] + ',' + s[3] + '">카카오맵</a>';
-    h += '<a target="_blank" rel="noopener" href="https://map.naver.com/p/search/' + q + '">네이버 지도</a></div>';
+      ? '<a class="out" target="_blank" rel="noopener" href="https://map.kakao.com/link/search/' + q + '">카카오맵</a>'
+      : '<a class="out" target="_blank" rel="noopener" href="https://map.kakao.com/link/map/' + q + ',' + s[2] + ',' + s[3] + '">카카오맵</a>';
+    h += '<a class="out" target="_blank" rel="noopener" href="https://map.naver.com/p/search/' + q + '">네이버 지도</a>';
+    var alts = alternatives(idx);
+    if (alts.length) {
+      h += '<h3>같은 날 더 한산한 비슷한 곳 (30km 안, ' + esc(data.groups[s[4]]) + ')</h3>';
+      alts.forEach(function (a) {
+        var t = data.spots[a.i];
+        h += '<button class="alt" type="button" data-i="' + a.i + '"><span><span class="name">' + esc(t[0]) +
+          '</span><br><span class="meta">' + esc(t[1]) + ' · ' + IO[t[5]] + ' · ' +
+          (a.d < 10 ? a.d.toFixed(1) : Math.round(a.d)) + 'km 거리</span></span><b style="color:' + color(a.v) + '">' + a.v + '</b></button>';
+      });
+    }
     return h;
+  }
+  function openSpot(idx, pan) {
+    var s = data.spots[idx], box = document.getElementById('detail');
+    state.sel = idx;
+    box.innerHTML = detailHtml(idx); box.style.display = 'block';
+    ring.setLatLng([s[2], s[3]]); ring.setStyle({ opacity: 1 });
+    if (pan) map.setView([s[2], s[3]], Math.max(map.getZoom(), 13), { animate: false });
+  }
+  function closeSpot() {
+    state.sel = -1;
+    document.getElementById('detail').style.display = 'none';
+    ring.setStyle({ opacity: 0 });
   }
 
   function filtered() {
@@ -248,7 +431,7 @@
         radius: 8, weight: s[6] ? 2 : 1.5, color: '#fff', fillColor: color(o.v), fillOpacity: s[6] ? 0.55 : 0.95,
         dashArray: s[6] ? '3 3' : null, bubblingMouseEvents: false
       });
-      m.bindPopup(function () { return popupHtml(s); }, { maxWidth: 280, autoPanPaddingTopLeft: [10, 10] });
+      m.on('click', (function (i) { return function () { openSpot(i, false); }; })(o.i));
       m.addTo(layer); markers[o.i] = m;
     });
     centerMark.setLatLng([state.lat, state.lng]);
@@ -260,22 +443,28 @@
       rows.length + '곳' + (rows.length > LIST_MAX ? ' (목록은 ' + LIST_MAX + '곳까지)' : '');
     var ul = document.getElementById('list'), h = '';
     rows.slice(0, LIST_MAX).forEach(function (o) {
-      var s = o.s, bi = bestDay(s[7]);
+      var s = o.s, bi = bestDay(s[7]), wi = weekendBest(s[7]);
       h += '<li class="item" data-i="' + o.i + '"><div><div class="name">' + esc(s[0]) +
         '<span class="tag">' + IO[s[5]] + '</span>' + (s[6] ? '<span class="tag">위치 대략</span>' : '') + '</div>' +
         '<div class="meta">' + esc(s[1]) + ' · ' + esc(data.groups[s[4]]) + ' · ' +
         (o.d < 10 ? o.d.toFixed(1) : Math.round(o.d)) + 'km</div></div>' +
         '<div class="rate" style="color:' + color(o.v) + '">' + (o.v == null ? '-' : o.v) + '<small>' + word(o.v) + '</small></div>' +
         spark(s[7], state.day) +
-        (bi >= 0 ? '<div class="best">가장 한산한 날 <b>' + dayLabel(data.days[bi], bi) + '</b> ' + s[7][bi] + '</div>' : '') +
+        (bi >= 0 ? '<div class="best">가장 한산 <b>' + dayLabel(data.days[bi]) + '</b> ' + s[7][bi] +
+          (wi >= 0 ? ' · 주말 중 <b>' + dayLabel(data.days[wi]) + '</b> ' + s[7][wi] : '') + '</div>' : '') +
         '</li>';
     });
     ul.innerHTML = h || '<li class="empty">조건에 맞는 장소가 없습니다. 반경을 넓히거나 필터를 줄여 보세요.</li>';
-    store('hansan', { lat: state.lat, lng: state.lng, radius: state.radius });
+    if (state.sel >= 0) document.getElementById('detail').innerHTML = detailHtml(state.sel);
+    if (state.keep) store('hansan', { lat: state.lat, lng: state.lng, radius: state.radius });
+    else store('hansan', { radius: state.radius });
   }
 
-  function setCenter(lat, lng, fit) {
-    state.lat = lat; state.lng = lng;
+  function setCenter(lat, lng, fit, label, keep) {
+    state.lat = lat; state.lng = lng; state.keep = !!keep; state.label = label || '';
+    var an = document.getElementById('anchor');
+    an.innerHTML = label ? '기준점 <b>' + esc(label) + '</b>' : '';
+    an.style.display = label ? 'block' : 'none';
     render();
     if (fit) {
       if (state.radius) map.fitBounds(radiusCircle.getBounds(), { padding: [10, 10] });
@@ -292,16 +481,17 @@
 
     var sel = document.getElementById('day');
     d.days.forEach(function (iso, i) {
-      var o = document.createElement('option'); o.value = i; o.textContent = dayLabel(iso, i); sel.appendChild(o);
+      var o = document.createElement('option'); o.value = i; o.textContent = dayLabel(iso); sel.appendChild(o);
     });
     var ti = d.days.indexOf(todayIso());
     if (ti > 0) { state.day = ti; sel.value = String(ti); }
     if (ti < 0) say('자료의 날짜 범위에 오늘이 없습니다. 수집이 며칠 멈췄을 수 있습니다.');
-    sel.addEventListener('change', function () { state.day = +sel.value; map.closePopup(); render(); });
+    sel.addEventListener('change', function () { state.day = +sel.value; syncDayChips(); render(); });
+    buildDayChips(sel);
 
     var rad = document.getElementById('radius');
     rad.value = String(state.radius);
-    rad.addEventListener('change', function () { state.radius = +rad.value; setCenter(state.lat, state.lng, true); });
+    rad.addEventListener('change', function () { state.radius = +rad.value; setCenter(state.lat, state.lng, true, state.label, state.keep); });
 
     chips('ioRow', [{ key: 0, label: '실외' }, { key: 1, label: '실내' }, { key: 2, label: '혼합' }], state.io,
       function (k, b) {
@@ -333,22 +523,25 @@
     document.getElementById('list').addEventListener('click', function (e) {
       var li = e.target.closest ? e.target.closest('li.item') : null;
       if (!li) return;
-      var i = +li.getAttribute('data-i'), s = data.spots[i], m = markers[i];
-      map.setView([s[2], s[3]], Math.max(map.getZoom(), 13), { animate: false });
-      if (m) m.openPopup();
+      openSpot(+li.getAttribute('data-i'), true);
       document.getElementById('mapwrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    document.getElementById('detail').addEventListener('click', function (e) {
+      if (e.target.closest('.close')) { closeSpot(); return; }
+      var alt = e.target.closest('.alt');
+      if (alt) openSpot(+alt.getAttribute('data-i'), true);
     });
 
     document.getElementById('here').addEventListener('click', function () {
-      var c = map.getCenter(); setCenter(c.lat, c.lng, false);
+      var c = map.getCenter(); setCenter(c.lat, c.lng, false, '', true);
     });
-    map.on('contextmenu', function (e) { setCenter(e.latlng.lat, e.latlng.lng, false); });
+    map.on('contextmenu', function (e) { setCenter(e.latlng.lat, e.latlng.lng, false, '', true); });
 
     document.getElementById('locate').addEventListener('click', function () {
       if (!navigator.geolocation) { say('이 브라우저는 위치 기능을 지원하지 않습니다. 지도를 옮긴 뒤 "이 화면 중심으로 검색"을 누르세요.'); return; }
       say('위치 확인 중…');
       navigator.geolocation.getCurrentPosition(function (p) {
-        say(''); setCenter(p.coords.latitude, p.coords.longitude, true);
+        say(''); setCenter(p.coords.latitude, p.coords.longitude, true, '내 위치', false);
       }, function (err) {
         say(err.code === 1
           ? '위치 권한이 꺼져 있습니다. 브라우저 설정에서 위치를 허용하거나, 지도를 옮긴 뒤 "이 화면 중심으로 검색"을 누르세요.'
@@ -356,11 +549,14 @@
       }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 });
     });
 
-    setCenter(state.lat, state.lng, true);
+    setCenter(state.lat, state.lng, true, '', state.keep);
   }
 
   var saved = load('hansan');
-  if (saved && typeof saved.lat === 'number') { state.lat = saved.lat; state.lng = saved.lng; state.radius = saved.radius || 0; if (saved.radius === undefined) state.radius = 20; }
+  if (saved) {
+    if (typeof saved.radius === 'number') state.radius = saved.radius;
+    if (typeof saved.lat === 'number') { state.lat = saved.lat; state.lng = saved.lng; state.keep = true; }
+  }
 
   map = L.map('map', { preferCanvas: true, zoomControl: false }).setView([state.lat, state.lng], 11);
   L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -368,6 +564,7 @@
     maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
   radiusCircle = L.circle([state.lat, state.lng], { radius: 20000, color: '#1f6f54', weight: 1.5, fillColor: '#1f6f54', fillOpacity: 0.05, interactive: false }).addTo(map);
   layer = L.layerGroup().addTo(map);
+  ring = L.circleMarker([state.lat, state.lng], { radius: 14, color: '#1c2420', weight: 3, fill: false, opacity: 0, interactive: false }).addTo(map);
   centerMark = L.circleMarker([state.lat, state.lng], { radius: 6, color: '#fff', weight: 3, fillColor: '#1c2420', fillOpacity: 1, interactive: false }).addTo(map);
 
   fetch('data.json?t=' + Date.now()).then(function (r) {

@@ -23,6 +23,7 @@
   header { padding: 10px 14px 8px; background: var(--card); border-bottom: 1px solid var(--line); }
   .top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   h1 { font-size: 18px; margin: 0; letter-spacing: -0.02em; }
+  #home { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; color: inherit; cursor: pointer; }
   #updated { font-size: 12px; color: var(--sub); }
   .row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
   .row.scroll { overflow-x: auto; scrollbar-width: none; margin-right: -14px; padding-right: 14px; }
@@ -124,7 +125,7 @@
 </head>
 <body>
 <header>
-  <div class="top"><h1>한산지도</h1><span id="updated">불러오는 중</span></div>
+  <div class="top"><h1><button type="button" id="home" title="처음 화면으로">한산지도</button></h1><span id="updated">불러오는 중</span></div>
   <form class="row search" id="searchForm" autocomplete="off">
     <input id="q" type="search" placeholder="목적지 검색 (예: 속초해수욕장, 호텔 이름)" aria-label="목적지 검색" enterkeyhint="search">
     <button class="btn" type="submit">검색</button>
@@ -280,7 +281,8 @@
     box.onclick = function (e) {
       var b = e.target.closest('button'); if (!b) return;
       var p = list[+b.getAttribute('data-i')];
-      box.style.display = 'none'; document.getElementById('q').blur();
+      box.style.display = 'none';
+      var qi = document.getElementById('q'); qi.value = ''; qi.blur();
       closeSpot();
       setCenter(p.lat, p.lng, true, p.name, false);   // 검색 결과 좌표는 저장하지 않는다
     };
@@ -295,6 +297,10 @@
     run.then(function (x) { showResults(x.r, x.src); })
       .catch(function () { box.innerHTML = '<span class="src">검색에 실패했습니다. 잠시 뒤 다시 시도하세요.</span>'; });
   }
+  document.getElementById('home').addEventListener('click', function () {
+    try { localStorage.removeItem('hansan'); } catch (e) {}
+    location.reload();
+  });
   document.getElementById('searchForm').addEventListener('submit', function (e) {
     e.preventDefault();
     var q = document.getElementById('q').value.trim();
@@ -533,7 +539,7 @@
     });
 
     document.getElementById('here').addEventListener('click', function () {
-      var c = map.getCenter(); setCenter(c.lat, c.lng, false, '', true);
+      var c = map.getCenter(); closeSpot(); setCenter(c.lat, c.lng, false, '', true);
     });
     map.on('contextmenu', function (e) { setCenter(e.latlng.lat, e.latlng.lng, false, '', true); });
 
@@ -541,7 +547,7 @@
       if (!navigator.geolocation) { say('이 브라우저는 위치 기능을 지원하지 않습니다. 지도를 옮긴 뒤 "이 화면 중심으로 검색"을 누르세요.'); return; }
       say('위치 확인 중…');
       navigator.geolocation.getCurrentPosition(function (p) {
-        say(''); setCenter(p.coords.latitude, p.coords.longitude, true, '내 위치', false);
+        say(''); closeSpot(); setCenter(p.coords.latitude, p.coords.longitude, true, '내 위치', false);
       }, function (err) {
         say(err.code === 1
           ? '위치 권한이 꺼져 있습니다. 브라우저 설정에서 위치를 허용하거나, 지도를 옮긴 뒤 "이 화면 중심으로 검색"을 누르세요.'

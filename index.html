@@ -177,7 +177,7 @@
   <div class="bar">
     <span id="count"></span>
     <div class="seg" role="group" aria-label="정렬">
-      <button type="button" data-sort="pop" aria-pressed="false" id="sortPop" hidden>인기순</button>
+      <button type="button" data-sort="pop" aria-pressed="false" id="sortPop" hidden>거점순</button>
       <button type="button" data-sort="dist" aria-pressed="true">가까운 순</button>
       <button type="button" data-sort="rate" aria-pressed="false">한산한 순</button>
     </div>
@@ -188,7 +188,7 @@
     색 구간(39·69·84)은 이 화면에서 임의로 정한 기준입니다.
     실내·실외는 장소 유형으로 미루어 정한 값이어서 개별 장소와 다를 수 있습니다.
     '위치 대략' 표시는 정확한 좌표를 찾지 못해 시군구 중심 부근에 놓은 장소입니다.
-    '인기 순위'는 한국관광공사 「기초지자체 중심 관광지 정보」의 시군구별 순위(다른 관광지와 많이 연결되는 정도)이며 평점이 아닙니다.
+    '거점 순위'는 한국관광공사 「기초지자체 중심 관광지 정보」를 바탕으로 한 시군구별 순위(다른 관광지와 많이 연결되는 정도)이며, 방문객 수나 평점이 아닙니다. 시장·백화점은 빼고 매겼고, 유형에서 '쇼핑·시장'을 켜면 쇼핑끼리의 순위가 보입니다.
     <span id="stats"></span>
   </p>
 </main>
@@ -304,6 +304,77 @@
       setCenter(p.lat, p.lng, true, p.name, false);   // 검색 결과 좌표는 저장하지 않는다
     };
   }
+  // 입력하는 동안 뜨는 제안. 수집된 장소·시군구 이름에서 찾고(즉시), 카카오 키가 있으면 카카오 결과도 덧붙인다.
+  // OpenStreetMap 공용 검색은 정책상 자동완성에 쓸 수 없어, 그쪽은 '검색' 버튼을 눌렀을 때만 호출한다.
+  var regions = null, sugTimer = null, sugSeq = 0;
+  function buildRegions() {
+    var m = {};
+    data.spots.forEach(function (s) {
+      if (s[6]) return;
+      var r = m[s[1]] || (m[s[1]] = { name: s[1], lat: 0, lng: 0, n: 0 });
+      r.lat += s[2]; r.lng += s[3]; r.n++;
+    });
+    regions = Object.keys(m).map(function (k) { var r = m[k]; r.lat /= r.n; r.lng /= r.n; r.key = k.replace(/\s/g, ''); return r; });
+  }
+  function localSuggest(q) {
+    var k = q.replace(/\s/g, '').toLowerCase(), out = [];
+    if (!regions) buildRegions();
+    regions.forEach(function (r) {
+      var at = r.key.indexOf(k);
+      if (at >= 0) out.push({ name: r.name, addr: '지역 · 장소 ' + r.n + '곳', lat: r.lat, lng: r.lng, w: at === 0 ? 0 : 1 });
+    });
+    var places = [];
+    for (var i = 0; i < data.spots.length; i++) {
+      var s = data.spots[i];
+      if (s[6]) continue;
+      var at2 = s[0].replace(/\s/g, '').toLowerCase().indexOf(k);
+      if (at2 < 0) continue;
+      places.push({ name: s[0], addr: s[1] + ' · ' + data.groups[s[4]], lat: s[2], lng: s[3], spot: i,
+                    w: (at2 === 0 ? 0 : 50) + (s[10] > 0 ? Math.min(s[10], 40) : 45) + s[0].length * 0.1 });
+    }
+    places.sort(function (a, b) { return a.w - b.w; });
+    out.sort(function (a, b) { return a.w - b.w; });
+    return out.slice(0, 3).concat(places.slice(0, 7));
+  }
+  function showSuggest(q, list, more) {
+    var box = document.getElementById('results'), h = '';
+    list.forEach(function (p, i) {
+      h += '<button type="button" data-i="' + i + '"><span class="name">' + esc(p.name) + '</span><span class="meta">' + esc(p.addr) + '</span></button>';
+    });
+    h += '<button type="button" data-more="1"><span class="name" style="color:var(--accent)">‘' + esc(q) + '’ 지도에서 더 찾기</span>' +
+      '<span class="meta">호텔, 역, 주소처럼 목록에 없는 곳</span></button>';
+    if (more) h += '<span class="src">' + more + '</span>';
+    box.innerHTML = h; box.style.display = 'block';
+    box.onclick = function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      if (b.getAttribute('data-more')) { doSearch(q); return; }
+      var p = list[+b.getAttribute('data-i')];
+      box.style.display = 'none';
+      var qi = document.getElementById('q'); qi.value = ''; qi.blur();
+      closeSpot();
+      setCenter(p.lat, p.lng, true, p.name, false);
+      if (p.spot != null) openSpot(p.spot, false);
+    };
+  }
+  function suggest() {
+    var q = document.getElementById('q').value.trim(), seq = ++sugSeq;
+    if (!data || q.length < 1) { document.getElementById('results').style.display = 'none'; return; }
+    var local = localSuggest(q);
+    showSuggest(q, local, '');
+    if (!kakaoKey || q.length < 2) return;
+    clearTimeout(sugTimer);
+    sugTimer = setTimeout(function () {
+      searchKakao(q).then(function (r) {
+        if (seq !== sugSeq) return;                         // 그사이 더 입력했으면 버린다
+        var names = {}; local.forEach(function (p) { names[p.name] = 1; });
+        var extra = r.filter(function (p) { return !names[p.name]; }).slice(0, 5);
+        if (extra.length) showSuggest(q, local.concat(extra), '일부 결과: 카카오');
+      }).catch(function () {});
+    }, 350);
+  }
+  document.getElementById('q').addEventListener('input', suggest);
+  document.getElementById('q').addEventListener('focus', function () { if (this.value.trim()) suggest(); });
+
   function doSearch(q) {
     var box = document.getElementById('results');
     box.innerHTML = '<span class="src">검색 중…</span>'; box.style.display = 'block';
@@ -358,8 +429,15 @@
     return bi;
   }
 
+  // 지역 거점 순위. 쇼핑(시장·백화점)은 유형 필터에서 '쇼핑·시장'을 켰을 때만 쇼핑끼리의 순위로 쓴다.
+  function rankOf(s) {
+    if (!(s[10] > 0)) return 0;
+    if (s[11]) return state.grp[7] ? s[10] : 0;
+    return s[10];
+  }
   function popTag(s) {
-    return s[10] > 0 && s[10] <= POP_MAX ? '<span class="tag pop">인기 ' + s[10] + '위</span>' : '';
+    var r = rankOf(s);
+    return r > 0 && r <= POP_MAX ? '<span class="tag pop">' + (s[11] ? '쇼핑 ' : '거점 ') + r + '위</span>' : '';
   }
   function weekendBest(r) {
     var bi = -1;
@@ -390,7 +468,7 @@
     var h = '<button class="close" type="button" aria-label="닫기">×</button>' +
       '<div class="name" style="padding-right:28px">' + esc(s[0]) + '</div>' +
       '<div class="meta">' + esc(s[1]) + ' · ' + esc(data.groups[s[4]]) + ' · ' + IO[s[5]] +
-      (s[6] ? ' · 위치 대략' : '') + (s[10] > 0 ? ' · 지역 인기 ' + s[10] + '위' : '') + '</div>' +
+      (s[6] ? ' · 위치 대략' : '') + (rankOf(s) > 0 ? ' · ' + (s[11] ? '쇼핑 ' : '지역 거점 ') + rankOf(s) + '위' : '') + '</div>' +
       '<div style="margin-top:8px"><b style="font-size:22px;color:' + color(v) + '">' + (v == null ? '-' : v) + '</b> ' + word(v) +
       ' <span class="meta">' + dayLabel(data.days[state.day]) + '</span></div>' +
       spark(r, state.day) +
@@ -447,13 +525,13 @@
       var pickA = function (maxRate) {
         var per = {}, out = [];
         pool.filter(function (o) {
-          var t = data.spots[o.i], rk = t[10];
+          var t = data.spots[o.i], rk = rankOf(t);
           // 시장·기타 유형은 사용자가 그 유형을 직접 고른 경우에만 추천에 넣는다. 주말에 한산해지는 평일형 장소도 뺀다.
           if (!gOn && (t[4] === 7 || t[4] === 8)) return false;
           return rk > 0 && rk <= 40 && o.v <= maxRate && o.lift >= 0;
         })
           .map(function (o) {
-            var rk = data.spots[o.i][10];
+            var rk = rankOf(data.spots[o.i]);
             o.rank = rk;
             o.scoreA = (41 - rk) * 1.2 + (100 - o.v) * 0.6 + o.lift * 0.3 - Math.min(o.d / span, 1) * 10;
             return o;
@@ -491,7 +569,7 @@
     var title = mode === 'weekend' ? '주말 추천' : dayLabel(data.days[state.day]) + ' 추천';
     var h = '<button class="close" type="button" aria-label="닫기">×</button><h2>' + title + '</h2>' +
       '<div class="why">' + (list.byRank
-        ? '시군구 안에서 인기 순위가 높은 곳 가운데 그날 덜 붐비는 곳입니다. 지금 켜 둔 반경과 필터 안에서 골랐습니다.'
+        ? '시군구 안에서 거점 순위가 높은 곳 가운데 그날 덜 붐비는 곳입니다. 지금 켜 둔 반경과 필터 안에서 골랐습니다.'
         : '주말에 붐비는 편인 곳 가운데 그날은 한산한 곳입니다. 지금 켜 둔 반경과 필터 안에서 골랐고, 장소의 인기나 평점은 반영하지 못합니다.') + '</div>';
     if (!list.length) h += '<div class="empty">조건에 맞는 곳이 없습니다. 반경을 넓히거나 필터를 줄여 보세요.</div>';
     list.forEach(function (o) {
@@ -499,7 +577,7 @@
       h += '<button class="alt" type="button" data-i="' + o.i + '" data-day="' + o.day + '"><span><span class="name">' + esc(t[0]) +
         '</span><br><span class="meta">' + esc(t[1]) + ' · ' + esc(data.groups[t[4]]) + ' · ' + IO[t[5]] + ' · ' +
         (o.d < 10 ? o.d.toFixed(1) : Math.round(o.d)) + 'km<br><b style="color:var(--ink);font-size:13px">' + dayLabel(data.days[o.day]) +
-        '</b> · ' + (o.rank ? '지역 인기 ' + o.rank + '위' : '30일 중 최고 ' + o.peak) + '</span></span><b style="color:' + color(o.v) + '">' + o.v + '</b></button>';
+        '</b> · ' + (o.rank ? '지역 거점 ' + o.rank + '위' : '30일 중 최고 ' + o.peak) + '</span></span><b style="color:' + color(o.v) + '">' + o.v + '</b></button>';
     });
     box.innerHTML = h; box.style.display = 'block';
   }
@@ -524,7 +602,7 @@
       var s = data.spots[i];
       if (ioOn && !state.io[s[5]]) continue;
       if (gOn && !state.grp[s[4]]) continue;
-      if (state.pop && !(s[10] > 0 && s[10] <= POP_MAX)) continue;
+      if (state.pop && !(rankOf(s) > 0 && rankOf(s) <= POP_MAX)) continue;
       var v = s[7][state.day];
       if (state.level && (v == null || v >= lim)) continue;
       var d = km(state.lat, state.lng, s[2], s[3]);
@@ -534,7 +612,7 @@
     out.sort(state.sort === 'rate'
       ? function (a, b) { return (a.v == null ? 999 : a.v) - (b.v == null ? 999 : b.v) || a.d - b.d; }
       : state.sort === 'pop'
-      ? function (a, b) { return (a.s[10] > 0 ? a.s[10] : 999) - (b.s[10] > 0 ? b.s[10] : 999) || a.d - b.d; }
+      ? function (a, b) { return (rankOf(a.s) || 999) - (rankOf(b.s) || 999) || a.d - b.d; }
       : function (a, b) { return a.d - b.d; });
     return out;
   }
@@ -597,7 +675,7 @@
     var st = d.stats || {};
     document.getElementById('stats').textContent = '전체 ' + (st.total || d.spots.length) + '곳 중 위치 확정 ' +
       (st.placed || 0) + '곳, 대략 위치 ' + (st.approx || 0) + '곳' + (st.dropped ? ', 제외 ' + st.dropped + '곳' : '') +
-      (st.ranked ? ', 인기 순위 ' + st.ranked + '곳(' + st.hubYm + ' 기준)' : '') + '.';
+      (st.ranked ? ', 거점 순위 ' + st.ranked + '곳(' + st.hubYm + ' 기준)' : '') + '.';
 
     var sel = document.getElementById('day');
     d.days.forEach(function (iso, i) {
@@ -620,7 +698,7 @@
       });
     if (d.stats && d.stats.ranked) {
       document.getElementById('sortPop').hidden = false;
-      chips('ioRow', [{ key: 'pop', label: '인기 장소만' }], {}, function (k, b) {
+      chips('ioRow', [{ key: 'pop', label: '주요 거점만' }], {}, function (k, b) {
         state.pop = !state.pop; b.setAttribute('aria-pressed', state.pop ? 'true' : 'false');
       });
     }

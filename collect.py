@@ -396,17 +396,27 @@ def apply_hub(spots, hub):
     ranked = filled = 0
     cache = {}
     for rec in spots:
-        rec.append(0)                                   # [10] 지역 인기 순위(없으면 0)
+        rec.append(0)                                   # [10] 지역 거점 순위(없으면 0)
+        rec.append(0)                                   # [11] 1이면 쇼핑(시장·백화점)끼리 매긴 순위
         cands = hub.get(str(rec[9]))
         if not cands:
             continue
         if rec[9] not in cache:
-            cache[rec[9]] = [(h, norm(h[1]), norm_keep(h[1])) for h in cands]
+            # 쇼핑은 따로 떼어, 쇼핑끼리/나머지끼리 순위를 다시 매긴다
+            rows, n_shop, n_etc = [], 0, 0
+            for h in sorted(cands):
+                shop = 1 if h[4] == "쇼핑" else 0
+                if shop:
+                    n_shop += 1
+                else:
+                    n_etc += 1
+                rows.append((h, norm(h[1]), norm_keep(h[1]), n_shop if shop else n_etc, shop))
+            cache[rec[9]] = rows
         n, nk = norm(rec[0]), norm_keep(rec[0])
         if len(n) < 2:
             continue
         found = None
-        for h, hn, hnk in cache[rec[9]]:
+        for h, hn, hnk, new_rank, shop in cache[rec[9]]:
             if not hn:
                 continue
             same = hnk == nk or hn == n
@@ -418,9 +428,10 @@ def apply_hub(spots, hub):
                 sim = difflib.SequenceMatcher(None, n, hn).ratio()
                 ok = (same and d <= 3000) or (part and d <= 800) or (sim >= 0.6 and d <= 250)
             if ok and (found is None or h[0] < found[0]):
-                found = h
+                found, found_rank, found_shop = h, new_rank, shop
         if found:
-            rec[10] = found[0]; ranked += 1
+            rec[10], rec[11] = found_rank, found_shop
+            ranked += 1
             if rec[6]:
                 rec[2], rec[3], rec[6] = found[3], found[2], 0
                 rec[4] = HUB_GROUP.get(found[4], 8)

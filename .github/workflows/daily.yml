@@ -28,5 +28,6 @@ jobs:
           git config user.name "crowdmap-bot"
           git config user.email "actions@users.noreply.github.com"
           git add data.json unmatched.txt
+          if [ -f hub.json ]; then git add hub.json; fi
           git diff --cached --quiet || git commit -m "data $(date -u +%F)"
           git push

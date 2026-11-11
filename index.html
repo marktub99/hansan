@@ -75,6 +75,7 @@
   .best { grid-column: 1 / -1; font-size: 12.5px; color: var(--sub); }
   .best b { color: var(--ink); }
   .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #eef1f4; color: var(--sub); margin-left: 4px; }
+  .tag.pop { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
   .empty, .note { color: var(--sub); font-size: 13px; padding: 14px 4px; }
   .note { padding: 16px 0 0; border-top: 1px solid var(--line); margin-top: 16px; line-height: 1.6; }
   .pop { font-size: 13px; }
@@ -115,6 +116,12 @@
     background: none; padding: 8px 0; text-align: left; cursor: pointer; gap: 8px; }
   .alt b { font-variant-numeric: tabular-nums; font-size: 16px; }
   .facts { font-size: 13px; margin: 6px 0 10px; line-height: 1.7; }
+  .recoBar { display: flex; gap: 8px; margin-bottom: 10px; }
+  .recoBar .btn { flex: 1; height: 42px; color: var(--accent); border-color: var(--sky); background: var(--accent-soft); }
+  #reco { display: none; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; position: relative; }
+  #reco h2 { font-size: 15px; margin: 0 28px 2px 0; }
+  #reco .why { font-size: 12.5px; color: var(--sub); margin-bottom: 4px; }
+  #reco .close { position: absolute; right: 6px; top: 4px; border: 0; background: none; font-size: 22px; line-height: 1; padding: 6px 8px; color: var(--sub); cursor: pointer; }
   #msg { display: none; background: #fff4d6; color: #6b5200; font-size: 13px; padding: 8px 14px; }
   @media (min-width: 900px) {
     body { display: grid; grid-template-columns: 420px 1fr; grid-template-rows: auto 1fr; height: 100vh; }
@@ -159,6 +166,11 @@
   <button id="here" type="button">이 화면 중심으로 검색</button>
 </div>
 <main>
+  <div class="recoBar">
+    <button class="btn" type="button" data-reco="weekend">주말 추천</button>
+    <button class="btn" type="button" data-reco="day">선택한 날 추천</button>
+  </div>
+  <div id="reco"></div>
   <div id="detail"></div>
   <div class="bar">
     <span id="count"></span>
@@ -173,6 +185,7 @@
     색 구간(39·69·84)은 이 화면에서 임의로 정한 기준입니다.
     실내·실외는 장소 유형으로 미루어 정한 값이어서 개별 장소와 다를 수 있습니다.
     '위치 대략' 표시는 정확한 좌표를 찾지 못해 시군구 중심 부근에 놓은 장소입니다.
+    '인기 순위'는 한국관광공사 「기초지자체 중심 관광지 정보」의 시군구별 순위(다른 관광지와 많이 연결되는 정도)이며 평점이 아닙니다.
     <span id="stats"></span>
   </p>
 </main>
@@ -185,10 +198,10 @@
   var WD = ['일', '월', '화', '수', '목', '금', '토'];
   var COLORS = ['#2f9e62', '#d9a400', '#e8782a', '#d23b3b'];
   var GRAY = '#a9b2ad';
-  var LIST_MAX = 80, MARKER_MAX = 2500;
+  var LIST_MAX = 80, MARKER_MAX = 2500, POP_MAX = 30;
 
   var state = { lat: 37.5665, lng: 126.9780, radius: 20, day: 0, sort: 'dist',
-                io: {}, grp: {}, level: 0, sel: -1, keep: false, label: '' };
+                io: {}, grp: {}, level: 0, pop: false, sel: -1, keep: false, label: '' };
   var data = null, map, layer, centerMark, radiusCircle, ring, markers = {}, kakaoKey = '', kakaoReady = null;
 
   function store(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
@@ -342,6 +355,9 @@
     return bi;
   }
 
+  function popTag(s) {
+    return s[10] > 0 && s[10] <= POP_MAX ? '<span class="tag pop">인기 ' + s[10] + '위</span>' : '';
+  }
   function weekendBest(r) {
     var bi = -1;
     for (var i = 0; i < r.length; i++) {
@@ -371,7 +387,7 @@
     var h = '<button class="close" type="button" aria-label="닫기">×</button>' +
       '<div class="name" style="padding-right:28px">' + esc(s[0]) + '</div>' +
       '<div class="meta">' + esc(s[1]) + ' · ' + esc(data.groups[s[4]]) + ' · ' + IO[s[5]] +
-      (s[6] ? ' · 위치 대략' : '') + '</div>' +
+      (s[6] ? ' · 위치 대략' : '') + (s[10] > 0 ? ' · 지역 인기 ' + s[10] + '위' : '') + '</div>' +
       '<div style="margin-top:8px"><b style="font-size:22px;color:' + color(v) + '">' + (v == null ? '-' : v) + '</b> ' + word(v) +
       ' <span class="meta">' + dayLabel(data.days[state.day]) + '</span></div>' +
       spark(r, state.day) +
@@ -396,6 +412,90 @@
     }
     return h;
   }
+  // ----- 추천: 평소 붐비는 날이 있는 곳 중, 고른 날에 한산한 곳 -----
+  function recommend(mode) {
+    var isWeekend = data.days.map(function (iso) { var w = new Date(iso + 'T00:00:00').getDay(); return w === 0 || w === 6; });
+    var days = mode === 'weekend' ? dayChips.map(function (x) { return x.i; }) : [state.day];
+    var ioOn = Object.keys(state.io).length, gOn = Object.keys(state.grp).length;
+    var span = state.radius || 100, pool = [];
+    for (var i = 0; i < data.spots.length; i++) {
+      var s = data.spots[i];
+      if (s[6]) continue;
+      if (ioOn && !state.io[s[5]]) continue;
+      if (gOn && !state.grp[s[4]]) continue;
+      var d = km(state.lat, state.lng, s[2], s[3]);
+      if (state.radius && d > state.radius) continue;
+      var r = s[7], peak = -1, bd = -1, we = 0, wen = 0, wk = 0, wkn = 0;
+      for (var k = 0; k < r.length; k++) {
+        if (r[k] == null) continue;
+        if (r[k] > peak) peak = r[k];
+        if (isWeekend[k]) { we += r[k]; wen++; } else { wk += r[k]; wkn++; }
+      }
+      // 주말에 더 붐비는 곳(나들이 장소일 가능성이 높은 곳)인지
+      var lift = wen && wkn ? we / wen - wk / wkn : 0;
+      days.forEach(function (di) { if (r[di] != null && (bd < 0 || r[di] < r[bd])) bd = di; });
+      if (bd < 0) continue;
+      if (r[bd] < 5) continue;                    // 0에 가까운 값은 휴장 등 이상값일 수 있어 제외
+      pool.push({ i: i, d: d, day: bd, v: r[bd], peak: peak, lift: lift, score: (peak - r[bd]) - Math.min(d / span, 1) * 10 });
+    }
+    var hasRank = !!(data.stats && data.stats.ranked);
+    if (hasRank) {
+      // 방식 A: 시군구 안 인기 순위가 높은 곳 가운데 그날 덜 붐비는 곳
+      var pickA = function (maxRate) {
+        var per = {}, out = [];
+        pool.filter(function (o) { var rk = data.spots[o.i][10]; return rk > 0 && rk <= 40 && o.v <= maxRate; })
+          .map(function (o) {
+            var rk = data.spots[o.i][10];
+            o.rank = rk;
+            o.scoreA = (41 - rk) * 1.2 + (100 - o.v) * 0.6 + o.lift * 0.3 - Math.min(o.d / span, 1) * 10;
+            return o;
+          })
+          .sort(function (a, b) { return b.scoreA - a.scoreA; })
+          .forEach(function (o) {
+            var g = data.spots[o.i][4];
+            if (out.length >= 5 || (per[g] || 0) >= 2) return;
+            per[g] = (per[g] || 0) + 1; out.push(o);
+          });
+        return out;
+      };
+      var a = pickA(69);
+      if (a.length < 3) a = pickA(84);
+      if (a.length) { a.byRank = true; return a; }
+    }
+    function pick(minPeak, maxRate, minGap, minLift) {
+      var per = {}, out = [];
+      pool.filter(function (o) { return o.peak >= minPeak && o.v <= maxRate && o.peak - o.v >= minGap && o.lift >= minLift; })
+        .sort(function (a, b) { return b.score - a.score; })
+        .forEach(function (o) {
+          var g = data.spots[o.i][4];
+          if (out.length >= 5 || (per[g] || 0) >= 2) return;
+          per[g] = (per[g] || 0) + 1; out.push(o);
+        });
+      return out;
+    }
+    var out = pick(70, 50, 30, 10);
+    if (out.length < 3) out = pick(60, 55, 20, 5);
+    if (out.length < 3) out = pick(55, 60, 15, -100);
+    return out;
+  }
+  function showReco(mode) {
+    var box = document.getElementById('reco'), list = recommend(mode);
+    var title = mode === 'weekend' ? '주말 추천' : dayLabel(data.days[state.day]) + ' 추천';
+    var h = '<button class="close" type="button" aria-label="닫기">×</button><h2>' + title + '</h2>' +
+      '<div class="why">' + (list.byRank
+        ? '시군구 안에서 인기 순위가 높은 곳 가운데 그날 덜 붐비는 곳입니다. 지금 켜 둔 반경과 필터 안에서 골랐습니다.'
+        : '주말에 붐비는 편인 곳 가운데 그날은 한산한 곳입니다. 지금 켜 둔 반경과 필터 안에서 골랐고, 장소의 인기나 평점은 반영하지 못합니다.') + '</div>';
+    if (!list.length) h += '<div class="empty">조건에 맞는 곳이 없습니다. 반경을 넓히거나 필터를 줄여 보세요.</div>';
+    list.forEach(function (o) {
+      var t = data.spots[o.i];
+      h += '<button class="alt" type="button" data-i="' + o.i + '" data-day="' + o.day + '"><span><span class="name">' + esc(t[0]) +
+        '</span><br><span class="meta">' + esc(t[1]) + ' · ' + esc(data.groups[t[4]]) + ' · ' + IO[t[5]] + ' · ' +
+        (o.d < 10 ? o.d.toFixed(1) : Math.round(o.d)) + 'km<br><b style="color:var(--ink);font-size:13px">' + dayLabel(data.days[o.day]) +
+        '</b> · ' + (o.rank ? '지역 인기 ' + o.rank + '위' : '30일 중 최고 ' + o.peak) + '</span></span><b style="color:' + color(o.v) + '">' + o.v + '</b></button>';
+    });
+    box.innerHTML = h; box.style.display = 'block';
+  }
+
   function openSpot(idx, pan) {
     var s = data.spots[idx], box = document.getElementById('detail');
     state.sel = idx;
@@ -416,6 +516,7 @@
       var s = data.spots[i];
       if (ioOn && !state.io[s[5]]) continue;
       if (gOn && !state.grp[s[4]]) continue;
+      if (state.pop && !(s[10] > 0 && s[10] <= POP_MAX)) continue;
       var v = s[7][state.day];
       if (state.level && (v == null || v >= lim)) continue;
       var d = km(state.lat, state.lng, s[2], s[3]);
@@ -430,6 +531,7 @@
 
   function render() {
     if (!data) return;
+    document.getElementById('reco').style.display = 'none';
     var rows = filtered();
     layer.clearLayers(); markers = {};
     rows.slice(0, MARKER_MAX).forEach(function (o) {
@@ -452,7 +554,7 @@
     rows.slice(0, LIST_MAX).forEach(function (o) {
       var s = o.s, bi = bestDay(s[7]), wi = weekendBest(s[7]);
       h += '<li class="item" data-i="' + o.i + '"><div><div class="name">' + esc(s[0]) +
-        '<span class="tag">' + IO[s[5]] + '</span>' + (s[6] ? '<span class="tag">위치 대략</span>' : '') + '</div>' +
+        '<span class="tag">' + IO[s[5]] + '</span>' + (s[6] ? '<span class="tag">위치 대략</span>' : '') + popTag(s) + '</div>' +
         '<div class="meta">' + esc(s[1]) + ' · ' + esc(data.groups[s[4]]) + ' · ' +
         (o.d < 10 ? o.d.toFixed(1) : Math.round(o.d)) + 'km</div></div>' +
         '<div class="rate" style="color:' + color(o.v) + '">' + (o.v == null ? '-' : o.v) + '<small>' + word(o.v) + '</small></div>' +
@@ -484,7 +586,8 @@
     document.getElementById('updated').textContent = d.updated + ' 기준';
     var st = d.stats || {};
     document.getElementById('stats').textContent = '전체 ' + (st.total || d.spots.length) + '곳 중 위치 확정 ' +
-      (st.placed || 0) + '곳, 대략 위치 ' + (st.approx || 0) + '곳' + (st.dropped ? ', 제외 ' + st.dropped + '곳' : '') + '.';
+      (st.placed || 0) + '곳, 대략 위치 ' + (st.approx || 0) + '곳' + (st.dropped ? ', 제외 ' + st.dropped + '곳' : '') +
+      (st.ranked ? ', 인기 순위 ' + st.ranked + '곳(' + st.hubYm + ' 기준)' : '') + '.';
 
     var sel = document.getElementById('day');
     d.days.forEach(function (iso, i) {
@@ -505,6 +608,11 @@
         if (state.io[k]) delete state.io[k]; else state.io[k] = 1;
         b.setAttribute('aria-pressed', state.io[k] ? 'true' : 'false');
       });
+    if (d.stats && d.stats.ranked) {
+      chips('ioRow', [{ key: 'pop', label: '인기 장소만' }], {}, function (k, b) {
+        state.pop = !state.pop; b.setAttribute('aria-pressed', state.pop ? 'true' : 'false');
+      });
+    }
     var lvBtns = [];
     chips('lvRow', [{ key: 2, label: '한산한 곳만' }, { key: 1, label: '보통 이하' }], {},
       function (k, b) {
@@ -531,6 +639,17 @@
       var li = e.target.closest ? e.target.closest('li.item') : null;
       if (!li) return;
       openSpot(+li.getAttribute('data-i'), true);
+      document.getElementById('mapwrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.recoBar .btn'), function (b) {
+      b.addEventListener('click', function () { showReco(b.getAttribute('data-reco')); });
+    });
+    document.getElementById('reco').addEventListener('click', function (e) {
+      if (e.target.closest('.close')) { document.getElementById('reco').style.display = 'none'; return; }
+      var a = e.target.closest('.alt'); if (!a) return;
+      state.day = +a.getAttribute('data-day'); sel.value = String(state.day); syncDayChips(); render();
+      document.getElementById('reco').style.display = 'block';   // 고른 뒤에도 추천 목록은 남겨 둔다
+      openSpot(+a.getAttribute('data-i'), true);
       document.getElementById('mapwrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     document.getElementById('detail').addEventListener('click', function (e) {

@@ -15,6 +15,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
@@ -23,8 +24,8 @@ KEY = os.environ.get("DATA_GO_KR_KEY", "").strip()
 BASE = "https://apis.data.go.kr/B551011"
 APP = "crowdmap"
 KST = timezone(timedelta(hours=9))
-MAX_CALLS = {"tats": 900, "kor": 600}   # 개발계정 하루 1,000건 한도 안쪽으로 제한
-calls = {"tats": 0, "kor": 0}
+MAX_CALLS = {"tats": 900, "kor": 600, "hub": 700}   # 개발계정 하루 1,000건 한도 안쪽으로 제한
+calls = {"tats": 0, "kor": 0, "hub": 0}
 
 GROUPS = ["자연", "역사·유적", "공원·테마파크", "전시·문화시설", "거리·랜드마크",
           "체험", "레저·스포츠", "쇼핑·시장", "기타"]
@@ -52,6 +53,40 @@ def log(*a):
     print(*a, flush=True)
 
 
+def parse_body(raw):
+    """응답 본문 해석 -> ("ok", (items, total)) | ("retry", 사유) | ("stop", 사유).
+    서비스에 따라 _type=json 을 줘도 XML 로 내려오므로 둘 다 처리한다."""
+    text = raw.lstrip()
+    if text.startswith("{"):
+        try:
+            body = json.loads(text)
+        except ValueError:
+            return "retry", text[:120]
+        resp = body.get("response", body)
+        head = resp.get("header", {})
+        code = str(head.get("resultCode", ""))
+        if code not in ("0000", "00"):
+            msg = "%s %s" % (code, head.get("resultMsg", ""))
+            return ("stop" if code in ("20", "22", "30", "31") else "retry"), msg
+        b = resp.get("body") or {}
+        items = b.get("items") or {}
+        item = items.get("item", []) if isinstance(items, dict) else []
+        if isinstance(item, dict):
+            item = [item]
+        return "ok", (item, int(b.get("totalCount") or 0))
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return "retry", text[:120]
+    code = (root.findtext(".//resultCode") or "").strip()
+    msg = (root.findtext(".//returnAuthMsg") or root.findtext(".//resultMsg") or "").strip()
+    if code not in ("0000", "00"):
+        stop = code in ("20", "22", "30", "31") or re.search(r"LIMITED_NUMBER|SERVICE_KEY|SERVICE_ACCESS|DEADLINE", msg)
+        return ("stop" if stop else "retry"), ("%s %s" % (code, msg)).strip() or text[:120]
+    items = [{c.tag: (c.text or "") for c in it} for it in root.iter("item")]
+    return "ok", (items, int(root.findtext(".//totalCount") or 0))
+
+
 def call(kind, path, params, tries=4):
     """API 한 번 호출 -> (item 목록, totalCount). 인증키는 로그에 남기지 않는다."""
     if calls[kind] >= MAX_CALLS[kind]:
@@ -75,29 +110,12 @@ def call(kind, path, params, tries=4):
         except Exception as e:  # 시간 초과, 연결 끊김 등
             last = type(e).__name__
         else:
-            try:
-                body = json.loads(raw)
-            except ValueError:
-                # 오류일 때는 JSON 대신 XML 로 내려온다
-                m = re.search(r"<returnAuthMsg>([^<]*)", raw) or re.search(r"<resultMsg>([^<]*)", raw)
-                last = (m.group(1) if m else raw[:120]).strip()
-                if re.search(r"LIMITED_NUMBER|SERVICE_KEY|SERVICE_ACCESS|DEADLINE", raw):
-                    raise ApiStop(last)
-            else:
-                resp = body.get("response", body)
-                head = resp.get("header", {})
-                code = str(head.get("resultCode", ""))
-                if code not in ("0000", "00"):
-                    last = "%s %s" % (code, head.get("resultMsg", ""))
-                    if code in ("20", "22", "30", "31"):
-                        raise ApiStop(last)
-                else:
-                    b = resp.get("body") or {}
-                    items = b.get("items") or {}
-                    item = items.get("item", []) if isinstance(items, dict) else []
-                    if isinstance(item, dict):
-                        item = [item]
-                    return item, int(b.get("totalCount") or 0)
+            kind_, payload = parse_body(raw)
+            if kind_ == "ok":
+                return payload
+            last = payload
+            if kind_ == "stop":
+                raise ApiStop(last)
         time.sleep(1.5 * (i + 1))
     raise RuntimeError("호출 실패: %s (%s)" % (path, last))
 
@@ -284,6 +302,132 @@ def load_rates(sigungu):
     return result, names, failed
 
 
+HUB_GROUP = {"자연관광": 0, "역사관광": 1, "문화관광": 3, "체험관광": 5, "레저스포츠": 6, "쇼핑": 7}
+
+
+def load_hub(sigungu, path):
+    """기초지자체 중심 관광지(시군구별 100위). 월 단위 자료라 한 달에 한 번만 받는다.
+    반환: {시군구코드(str): [[순위, 이름, 경도, 위도, 중분류], ...]} (관광지만, 최근 두 달 중 좋은 순위)"""
+    try:
+        old = json.load(open(path, encoding="utf-8"))
+    except Exception:
+        old = None
+    today = datetime.now(KST).date()
+    if old and old.get("items"):
+        try:
+            age = (today - datetime.strptime(old.get("fetched", ""), "%Y-%m-%d").date()).days
+        except ValueError:
+            age = 999
+        if age < 20:
+            return old["items"], old.get("ym", "")
+    # 가장 최근에 자료가 있는 달 찾기
+    months, y, m = [], today.year, today.month
+    for _ in range(10):
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+        months.append("%04d%02d" % (y, m))
+    latest = None
+    try:
+        for i, ym in enumerate(months):
+            items, total = call("hub", "LocgoHubTarService1/areaBasedList1",
+                                {"baseYm": ym, "areaCd": 11, "signguCd": 11110, "numOfRows": 1, "pageNo": 1}, tries=2)
+            if total > 0:
+                latest = i
+                break
+    except Exception as e:
+        log("   중심 관광지 자료 확인 실패:", e)
+    if latest is None:
+        return (old or {}).get("items", {}), (old or {}).get("ym", "")
+    use = months[latest:latest + 2]
+    best, stop = {}, []
+
+    def one(job):
+        ym, (area, _, sg, _) = job
+        if stop:
+            return
+        try:
+            items = fetch_all("hub", "LocgoHubTarService1/areaBasedList1",
+                              {"baseYm": ym, "areaCd": area, "signguCd": sg}, 100)
+        except ApiStop as e:
+            stop.append(str(e)); return
+        except Exception:
+            return
+        for it in items:
+            if (it.get("hubCtgryLclsNm") or "") != "관광지":
+                continue
+            try:
+                rank, x, y_ = int(it.get("hubRank")), float(it.get("mapX")), float(it.get("mapY"))
+            except (TypeError, ValueError):
+                continue
+            name = (it.get("hubTatsNm") or "").strip()
+            if not name:
+                continue
+            key = (str(sg), name)
+            if key not in best or rank < best[key][0]:
+                best[key] = [rank, name, round(x, 5), round(y_, 5), it.get("hubCtgryMclsNm") or ""]
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        list(ex.map(one, [(ym, row) for ym in use for row in sigungu]))
+    if stop:
+        log("   중심 관광지 중단 사유:", stop[0])
+    out = {}
+    for (sg, _), v in best.items():
+        out.setdefault(sg, []).append(v)
+    for v in out.values():
+        v.sort()
+    if len(out) < len(sigungu) * 0.5:          # 절반도 못 받았으면 예전 자료 유지
+        return (old or {}).get("items", out), (old or {}).get("ym", use[0])
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"ym": use[0], "fetched": today.strftime("%Y-%m-%d"), "items": out}, f,
+                  ensure_ascii=False, separators=(",", ":"))
+    return out, use[0]
+
+
+def dist_m(lat1, lng1, lat2, lng2):
+    import math
+    p = math.pi / 180
+    x = (lng2 - lng1) * p * math.cos((lat1 + lat2) * p / 2)
+    return math.hypot(x, (lat2 - lat1) * p) * 6371000
+
+
+def apply_hub(spots, hub):
+    """혼잡도 장소에 지역 인기 순위를 붙인다. 좌표를 못 찾았던 장소는 이름이 맞으면 좌표도 채운다."""
+    ranked = filled = 0
+    cache = {}
+    for rec in spots:
+        rec.append(0)                                   # [10] 지역 인기 순위(없으면 0)
+        cands = hub.get(str(rec[9]))
+        if not cands:
+            continue
+        if rec[9] not in cache:
+            cache[rec[9]] = [(h, norm(h[1]), norm_keep(h[1])) for h in cands]
+        n, nk = norm(rec[0]), norm_keep(rec[0])
+        if len(n) < 2:
+            continue
+        found = None
+        for h, hn, hnk in cache[rec[9]]:
+            if not hn:
+                continue
+            same = hnk == nk or hn == n
+            part = len(n) >= 3 and len(hn) >= 3 and (n in hn or hn in n) and min(len(n), len(hn)) / max(len(n), len(hn)) >= 0.5
+            if rec[6]:                                  # 좌표 없는 장소: 이름만으로 판단하므로 엄격하게
+                ok = same or (part and min(len(n), len(hn)) / max(len(n), len(hn)) >= 0.6)
+            else:
+                d = dist_m(rec[2], rec[3], h[3], h[2])
+                sim = difflib.SequenceMatcher(None, n, hn).ratio()
+                ok = (same and d <= 3000) or (part and d <= 800) or (sim >= 0.6 and d <= 250)
+            if ok and (found is None or h[0] < found[0]):
+                found = h
+        if found:
+            rec[10] = found[0]; ranked += 1
+            if rec[6]:
+                rec[2], rec[3], rec[6] = found[3], found[2], 0
+                rec[4] = HUB_GROUP.get(found[4], 8)
+                filled += 1
+    return ranked, filled
+
+
 def main():
     if not KEY:
         log("환경변수 DATA_GO_KR_KEY 가 없습니다."); return 2
@@ -359,13 +503,24 @@ def main():
                 rec = [name, label, round(cy, 5), round(cx, 5), 8, IO_UNKNOWN, 1, r, "", sg]
             spots.append(rec)
 
+    log("3) 지역 인기 순위(중심 관광지) 반영")
+    try:
+        hub, hub_ym = load_hub(sigungu, os.path.join(HERE, "hub.json"))
+    except Exception as e:
+        log("   실패:", e); hub, hub_ym = {}, ""
+    ranked, filled = apply_hub(spots, hub)
+    unmatched = [u for u in unmatched if not any(
+        (not s[6]) and u.startswith("%s|%s  " % (s[9], s[0])) for s in spots)] if filled else unmatched
+    log("   기준월 %s, 순위 붙은 장소 %d곳, 좌표 보충 %d곳, 호출 %d건" % (hub_ym or "-", ranked, filled, calls["hub"]))
+
     exact = len(spots) - sum(1 for s in spots if s[6])
     data = {
         "updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
         "days": ["%s-%s-%s" % (d[:4], d[4:6], d[6:]) for d in days],
         "groups": GROUPS,
         "stats": {"total": n_spots, "placed": exact, "approx": len(spots) - exact,
-                  "dropped": n_spots - len(spots), "failedRegions": len(failed)},
+                  "dropped": n_spots - len(spots), "failedRegions": len(failed),
+                  "ranked": ranked, "hubYm": hub_ym},
         "spots": spots,
     }
     with open(out_path, "w", encoding="utf-8") as f:
@@ -373,7 +528,7 @@ def main():
     with open(os.path.join(HERE, "unmatched.txt"), "w", encoding="utf-8") as f:
         f.write("# 위치를 자동으로 못 찾은 관광지 (시군구코드|관광지명). overrides.json 에 직접 넣을 수 있음\n")
         f.write("\n".join(unmatched) + "\n")
-    log("3) 저장 완료: 전체 %d곳 / 위치 확정 %d곳 / 대략 위치 %d곳 / 제외 %d곳"
+    log("4) 저장 완료: 전체 %d곳 / 위치 확정 %d곳 / 대략 위치 %d곳 / 제외 %d곳"
         % (n_spots, exact, len(spots) - exact, n_spots - len(spots)))
     log("   맞춘 방식:", how)
     return 0

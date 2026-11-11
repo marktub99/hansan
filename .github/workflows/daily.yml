@@ -1,0 +1,32 @@
+name: 혼잡도 수집
+
+on:
+  schedule:
+    - cron: "10 22 * * *"   # 매일 한국시간 오전 7시 10분경
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: collect
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 수집
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+        run: python collect.py
+      - name: 저장
+        run: |
+          git config user.name "crowdmap-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data.json unmatched.txt
+          git diff --cached --quiet || git commit -m "data $(date -u +%F)"
+          git push

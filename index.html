@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>한산지도</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --ink: #1c2420; --sub: #5d6a63; --line: #dfe5e1; --bg: #f5f7f5; --card: #fff;
+    --accent: #1f6f54; --accent-soft: #e3f1eb;
+    --c0: #2f9e62; --c1: #d9a400; --c2: #e8782a; --c3: #d23b3b; --cn: #a9b2ad;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+    color: var(--ink); background: var(--bg); font-size: 15px; line-height: 1.45;
+    -webkit-text-size-adjust: 100%;
+  }
+  button, select { font: inherit; color: inherit; }
+  header { padding: 10px 14px 8px; background: var(--card); border-bottom: 1px solid var(--line); }
+  .top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: -0.02em; }
+  #updated { font-size: 12px; color: var(--sub); }
+  .row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+  .row.scroll { overflow-x: auto; scrollbar-width: none; margin-right: -14px; padding-right: 14px; }
+  .row.scroll::-webkit-scrollbar { display: none; }
+  select, .btn {
+    height: 40px; border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+    padding: 0 10px; min-width: 0;
+  }
+  select { flex: 1; }
+  .btn { white-space: nowrap; cursor: pointer; font-weight: 600; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chip {
+    flex: none; height: 34px; padding: 0 12px; border-radius: 17px; border: 1px solid var(--line);
+    background: var(--card); color: var(--sub); cursor: pointer; white-space: nowrap; font-size: 14px;
+  }
+  .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .label { flex: none; font-size: 12px; color: var(--sub); width: 34px; }
+  #map { height: 44vh; min-height: 260px; background: #e8ece9; z-index: 0; }
+  #mapwrap { position: relative; }
+  #here {
+    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 500;
+    height: 38px; padding: 0 14px; border-radius: 19px; border: 0; background: var(--ink); color: #fff;
+    font-weight: 600; font-size: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.25); cursor: pointer;
+  }
+  .legend {
+    position: absolute; left: 8px; top: 8px; z-index: 500; background: rgba(255,255,255,.93);
+    border-radius: 8px; padding: 6px 8px; font-size: 11px; color: var(--sub); line-height: 1.7;
+  }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: 0; }
+  main { padding: 10px 14px 40px; }
+  .bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+  #count { font-size: 13px; color: var(--sub); }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--card); }
+  .seg button { border: 0; background: none; height: 34px; padding: 0 12px; font-size: 13px; color: var(--sub); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li.item {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px;
+    margin-bottom: 8px; display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; cursor: pointer;
+  }
+  .name { font-weight: 600; overflow-wrap: anywhere; }
+  .meta { font-size: 12.5px; color: var(--sub); }
+  .rate { text-align: right; font-weight: 700; font-size: 20px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .rate small { display: block; font-size: 11px; font-weight: 500; }
+  .spark { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 1px; height: 26px; margin-top: 2px; }
+  .spark i { flex: 1; min-width: 0; border-radius: 1px 1px 0 0; opacity: .55; }
+  .spark i.sel { opacity: 1; outline: 1.5px solid var(--ink); outline-offset: 0; }
+  .best { grid-column: 1 / -1; font-size: 12.5px; color: var(--sub); }
+  .best b { color: var(--ink); }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #eef1ef; color: var(--sub); margin-left: 4px; }
+  .empty, .note { color: var(--sub); font-size: 13px; padding: 14px 4px; }
+  .note { padding: 16px 0 0; border-top: 1px solid var(--line); margin-top: 16px; line-height: 1.6; }
+  .pop { font-size: 13px; min-width: 210px; }
+  .pop .name { font-size: 15px; }
+  .pop .spark { height: 44px; margin: 8px 0 2px; }
+  .pop .axis { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--sub); }
+  .pop a { color: var(--accent); font-weight: 600; text-decoration: none; margin-right: 12px; }
+  .leaflet-popup-content { margin: 12px 14px; }
+  #msg { display: none; background: #fff4d6; color: #6b5200; font-size: 13px; padding: 8px 14px; }
+  @media (min-width: 900px) {
+    body { display: grid; grid-template-columns: 420px 1fr; grid-template-rows: auto 1fr; height: 100vh; }
+    header { grid-column: 1; } #msg { grid-column: 1 / -1; }
+    #mapwrap { grid-column: 2; grid-row: 1 / span 3; } #map { height: 100vh; }
+    main { grid-column: 1; overflow-y: auto; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="top"><h1>한산지도</h1><span id="updated">불러오는 중</span></div>
+  <div class="row">
+    <button class="btn primary" id="locate" type="button">내 위치</button>
+    <select id="radius" aria-label="반경">
+      <option value="5">반경 5km</option><option value="10">반경 10km</option>
+      <option value="20" selected>반경 20km</option><option value="50">반경 50km</option>
+      <option value="100">반경 100km</option><option value="0">전국</option>
+    </select>
+    <select id="day" aria-label="날짜"></select>
+  </div>
+  <div class="row scroll" id="ioRow"><span class="label">장소</span></div>
+  <div class="row scroll" id="lvRow"><span class="label">혼잡</span></div>
+  <div class="row scroll" id="grpRow"><span class="label">유형</span></div>
+</header>
+<div id="msg" role="status"></div>
+<div id="mapwrap">
+  <div id="map"></div>
+  <div class="legend">
+    <span class="dot" style="background:var(--c0)"></span>한산 ~39<br>
+    <span class="dot" style="background:var(--c1)"></span>보통 40~69<br>
+    <span class="dot" style="background:var(--c2)"></span>붐빔 70~84<br>
+    <span class="dot" style="background:var(--c3)"></span>매우 붐빔 85~
+  </div>
+  <button id="here" type="button">이 화면 중심으로 검색</button>
+</div>
+<main>
+  <div class="bar">
+    <span id="count"></span>
+    <div class="seg" role="group" aria-label="정렬">
+      <button type="button" data-sort="dist" aria-pressed="true">가까운 순</button>
+      <button type="button" data-sort="rate" aria-pressed="false">한산한 순</button>
+    </div>
+  </div>
+  <ul id="list"></ul>
+  <p class="note">
+    숫자는 한국관광공사 「관광지 집중률 방문자 추이 예측 정보」의 집중률(0~100)입니다. 통신 데이터로 추정한 예측치라 실제와 다를 수 있습니다.
+    색 구간(39·69·84)은 이 화면에서 임의로 정한 기준입니다.
+    실내·실외는 장소 유형으로 미루어 정한 값이어서 개별 장소와 다를 수 있습니다.
+    '위치 대략' 표시는 정확한 좌표를 찾지 못해 시군구 중심 부근에 놓은 장소입니다.
+    <span id="stats"></span>
+  </p>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  'use strict';
+  var IO = ['실외', '실내', '혼합', '미분류'];
+  var WD = ['일', '월', '화', '수', '목', '금', '토'];
+  var COLORS = ['#2f9e62', '#d9a400', '#e8782a', '#d23b3b'];
+  var GRAY = '#a9b2ad';
+  var LIST_MAX = 80, MARKER_MAX = 2500;
+
+  var state = { lat: 37.5665, lng: 126.9780, radius: 20, day: 0, sort: 'dist',
+                io: {}, grp: {}, level: 0 };
+  var data = null, map, layer, centerMark, radiusCircle, markers = {};
+
+  function store(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function load(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function color(r) { return r == null ? GRAY : r < 40 ? COLORS[0] : r < 70 ? COLORS[1] : r < 85 ? COLORS[2] : COLORS[3]; }
+  function word(r) { return r == null ? '자료 없음' : r < 40 ? '한산' : r < 70 ? '보통' : r < 85 ? '붐빔' : '매우 붐빔'; }
+  function km(a, b, c, d) {
+    var R = 6371, p = Math.PI / 180, x = (d - b) * p * Math.cos((a + c) * p / 2), y = (c - a) * p;
+    return Math.sqrt(x * x + y * y) * R;
+  }
+  function dayLabel(iso, i) {
+    var d = new Date(iso + 'T00:00:00');
+    var s = (d.getMonth() + 1) + '/' + d.getDate() + '(' + WD[d.getDay()] + ')';
+    return iso === todayIso() ? '오늘 ' + s : s;
+  }
+  function todayIso() {
+    var n = new Date(), p = function (x) { return (x < 10 ? '0' : '') + x; };
+    return n.getFullYear() + '-' + p(n.getMonth() + 1) + '-' + p(n.getDate());
+  }
+  function say(t) { var m = document.getElementById('msg'); m.textContent = t || ''; m.style.display = t ? 'block' : 'none'; }
+
+  function chips(rowId, items, bag, onChange) {
+    var row = document.getElementById(rowId);
+    items.forEach(function (it) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'chip'; b.textContent = it.label;
+      b.setAttribute('aria-pressed', bag[it.key] ? 'true' : 'false');
+      b.addEventListener('click', function () {
+        onChange(it.key, b);
+        render();
+      });
+      row.appendChild(b);
+    });
+  }
+
+  function spark(r, sel) {
+    var h = '';
+    for (var i = 0; i < r.length; i++) {
+      var v = r[i];
+      h += '<i' + (i === sel ? ' class="sel"' : '') + ' style="height:' + (v == null ? 4 : Math.max(8, v)) +
+           '%;background:' + color(v) + '"></i>';
+    }
+    return '<div class="spark" aria-hidden="true">' + h + '</div>';
+  }
+  function bestDay(r) {
+    var bi = -1;
+    for (var i = 0; i < r.length; i++) if (r[i] != null && (bi < 0 || r[i] < r[bi])) bi = i;
+    return bi;
+  }
+
+  function popupHtml(s) {
+    var r = s[7], v = r[state.day], bi = bestDay(r);
+    var q = encodeURIComponent(s[0]);
+    var h = '<div class="pop"><div class="name">' + esc(s[0]) + '</div>' +
+      '<div class="meta">' + esc(s[1]) + ' · ' + esc(data.groups[s[4]]) + ' · ' + IO[s[5]] +
+      (s[6] ? ' · 위치 대략' : '') + '</div>' +
+      '<div style="margin-top:6px"><b style="color:' + color(v) + '">' + (v == null ? '-' : v) + '</b> ' + word(v) +
+      ' <span class="meta">' + dayLabel(data.days[state.day], state.day) + '</span></div>' +
+      spark(r, state.day) +
+      '<div class="axis"><span>' + dayLabel(data.days[0], 1) + '</span><span>' +
+      dayLabel(data.days[data.days.length - 1], 1) + '</span></div>';
+    if (bi >= 0) h += '<div class="meta" style="margin:6px 0 8px">가장 한산한 날 <b>' +
+      dayLabel(data.days[bi], bi) + '</b> ' + r[bi] + '</div>';
+    h += s[6]
+      ? '<a target="_blank" rel="noopener" href="https://map.kakao.com/link/search/' + q + '">카카오맵</a>'
+      : '<a target="_blank" rel="noopener" href="https://map.kakao.com/link/map/' + q + ',' + s[2] + ',' + s[3] + '">카카오맵</a>';
+    h += '<a target="_blank" rel="noopener" href="https://map.naver.com/p/search/' + q + '">네이버 지도</a></div>';
+    return h;
+  }
+
+  function filtered() {
+    var out = [], ioOn = Object.keys(state.io).length, gOn = Object.keys(state.grp).length;
+    var lim = state.level === 1 ? 70 : state.level === 2 ? 40 : 101;
+    for (var i = 0; i < data.spots.length; i++) {
+      var s = data.spots[i];
+      if (ioOn && !state.io[s[5]]) continue;
+      if (gOn && !state.grp[s[4]]) continue;
+      var v = s[7][state.day];
+      if (state.level && (v == null || v >= lim)) continue;
+      var d = km(state.lat, state.lng, s[2], s[3]);
+      if (state.radius && d > state.radius) continue;
+      out.push({ s: s, d: d, v: v, i: i });
+    }
+    out.sort(state.sort === 'rate'
+      ? function (a, b) { return (a.v == null ? 999 : a.v) - (b.v == null ? 999 : b.v) || a.d - b.d; }
+      : function (a, b) { return a.d - b.d; });
+    return out;
+  }
+
+  function render() {
+    if (!data) return;
+    var rows = filtered();
+    layer.clearLayers(); markers = {};
+    rows.slice(0, MARKER_MAX).forEach(function (o) {
+      var s = o.s;
+      var m = L.circleMarker([s[2], s[3]], {
+        radius: 8, weight: s[6] ? 2 : 1.5, color: '#fff', fillColor: color(o.v), fillOpacity: s[6] ? 0.55 : 0.95,
+        dashArray: s[6] ? '3 3' : null, bubblingMouseEvents: false
+      });
+      m.bindPopup(function () { return popupHtml(s); }, { maxWidth: 280, autoPanPaddingTopLeft: [10, 10] });
+      m.addTo(layer); markers[o.i] = m;
+    });
+    centerMark.setLatLng([state.lat, state.lng]);
+    radiusCircle.setLatLng([state.lat, state.lng]);
+    radiusCircle.setRadius((state.radius || 0) * 1000);
+    radiusCircle.setStyle({ opacity: state.radius ? 0.7 : 0, fillOpacity: state.radius ? 0.05 : 0 });
+
+    document.getElementById('count').textContent =
+      rows.length + '곳' + (rows.length > LIST_MAX ? ' (목록은 ' + LIST_MAX + '곳까지)' : '');
+    var ul = document.getElementById('list'), h = '';
+    rows.slice(0, LIST_MAX).forEach(function (o) {
+      var s = o.s, bi = bestDay(s[7]);
+      h += '<li class="item" data-i="' + o.i + '"><div><div class="name">' + esc(s[0]) +
+        '<span class="tag">' + IO[s[5]] + '</span>' + (s[6] ? '<span class="tag">위치 대략</span>' : '') + '</div>' +
+        '<div class="meta">' + esc(s[1]) + ' · ' + esc(data.groups[s[4]]) + ' · ' +
+        (o.d < 10 ? o.d.toFixed(1) : Math.round(o.d)) + 'km</div></div>' +
+        '<div class="rate" style="color:' + color(o.v) + '">' + (o.v == null ? '-' : o.v) + '<small>' + word(o.v) + '</small></div>' +
+        spark(s[7], state.day) +
+        (bi >= 0 ? '<div class="best">가장 한산한 날 <b>' + dayLabel(data.days[bi], bi) + '</b> ' + s[7][bi] + '</div>' : '') +
+        '</li>';
+    });
+    ul.innerHTML = h || '<li class="empty">조건에 맞는 장소가 없습니다. 반경을 넓히거나 필터를 줄여 보세요.</li>';
+    store('hansan', { lat: state.lat, lng: state.lng, radius: state.radius });
+  }
+
+  function setCenter(lat, lng, fit) {
+    state.lat = lat; state.lng = lng;
+    render();
+    if (fit) {
+      if (state.radius) map.fitBounds(radiusCircle.getBounds(), { padding: [10, 10] });
+      else map.setView([lat, lng], 7);
+    }
+  }
+
+  function init(d) {
+    data = d;
+    document.getElementById('updated').textContent = d.updated + ' 기준';
+    var st = d.stats || {};
+    document.getElementById('stats').textContent = '전체 ' + (st.total || d.spots.length) + '곳 중 위치 확정 ' +
+      (st.placed || 0) + '곳, 대략 위치 ' + (st.approx || 0) + '곳' + (st.dropped ? ', 제외 ' + st.dropped + '곳' : '') + '.';
+
+    var sel = document.getElementById('day');
+    d.days.forEach(function (iso, i) {
+      var o = document.createElement('option'); o.value = i; o.textContent = dayLabel(iso, i); sel.appendChild(o);
+    });
+    var ti = d.days.indexOf(todayIso());
+    if (ti > 0) { state.day = ti; sel.value = String(ti); }
+    if (ti < 0) say('자료의 날짜 범위에 오늘이 없습니다. 수집이 며칠 멈췄을 수 있습니다.');
+    sel.addEventListener('change', function () { state.day = +sel.value; map.closePopup(); render(); });
+
+    var rad = document.getElementById('radius');
+    rad.value = String(state.radius);
+    rad.addEventListener('change', function () { state.radius = +rad.value; setCenter(state.lat, state.lng, true); });
+
+    chips('ioRow', [{ key: 0, label: '실외' }, { key: 1, label: '실내' }, { key: 2, label: '혼합' }], state.io,
+      function (k, b) {
+        if (state.io[k]) delete state.io[k]; else state.io[k] = 1;
+        b.setAttribute('aria-pressed', state.io[k] ? 'true' : 'false');
+      });
+    var lvBtns = [];
+    chips('lvRow', [{ key: 2, label: '한산한 곳만' }, { key: 1, label: '보통 이하' }], {},
+      function (k, b) {
+        state.level = state.level === k ? 0 : k;
+        lvBtns.forEach(function (x) { x.b.setAttribute('aria-pressed', state.level === x.k ? 'true' : 'false'); });
+      });
+    Array.prototype.forEach.call(document.querySelectorAll('#lvRow .chip'), function (b, i) { lvBtns.push({ b: b, k: i === 0 ? 2 : 1 }); });
+    chips('grpRow', d.groups.map(function (g, i) { return { key: i, label: g }; }), state.grp,
+      function (k, b) {
+        if (state.grp[k]) delete state.grp[k]; else state.grp[k] = 1;
+        b.setAttribute('aria-pressed', state.grp[k] ? 'true' : 'false');
+      });
+
+    Array.prototype.forEach.call(document.querySelectorAll('.seg button'), function (b) {
+      b.addEventListener('click', function () {
+        state.sort = b.getAttribute('data-sort');
+        Array.prototype.forEach.call(document.querySelectorAll('.seg button'), function (x) {
+          x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+        render();
+      });
+    });
+
+    document.getElementById('list').addEventListener('click', function (e) {
+      var li = e.target.closest ? e.target.closest('li.item') : null;
+      if (!li) return;
+      var i = +li.getAttribute('data-i'), s = data.spots[i], m = markers[i];
+      map.setView([s[2], s[3]], Math.max(map.getZoom(), 13), { animate: false });
+      if (m) m.openPopup();
+      document.getElementById('mapwrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+    document.getElementById('here').addEventListener('click', function () {
+      var c = map.getCenter(); setCenter(c.lat, c.lng, false);
+    });
+    map.on('contextmenu', function (e) { setCenter(e.latlng.lat, e.latlng.lng, false); });
+
+    document.getElementById('locate').addEventListener('click', function () {
+      if (!navigator.geolocation) { say('이 브라우저는 위치 기능을 지원하지 않습니다. 지도를 옮긴 뒤 "이 화면 중심으로 검색"을 누르세요.'); return; }
+      say('위치 확인 중…');
+      navigator.geolocation.getCurrentPosition(function (p) {
+        say(''); setCenter(p.coords.latitude, p.coords.longitude, true);
+      }, function (err) {
+        say(err.code === 1
+          ? '위치 권한이 꺼져 있습니다. 브라우저 설정에서 위치를 허용하거나, 지도를 옮긴 뒤 "이 화면 중심으로 검색"을 누르세요.'
+          : '위치를 가져오지 못했습니다. 지도를 옮긴 뒤 "이 화면 중심으로 검색"을 누르세요.');
+      }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 });
+    });
+
+    setCenter(state.lat, state.lng, true);
+  }
+
+  var saved = load('hansan');
+  if (saved && typeof saved.lat === 'number') { state.lat = saved.lat; state.lng = saved.lng; state.radius = saved.radius || 0; if (saved.radius === undefined) state.radius = 20; }
+
+  map = L.map('map', { preferCanvas: true, zoomControl: false }).setView([state.lat, state.lng], 11);
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18, attribution: '&copy; OpenStreetMap' }).addTo(map);
+  radiusCircle = L.circle([state.lat, state.lng], { radius: 20000, color: '#1f6f54', weight: 1.5, fillColor: '#1f6f54', fillOpacity: 0.05, interactive: false }).addTo(map);
+  layer = L.layerGroup().addTo(map);
+  centerMark = L.circleMarker([state.lat, state.lng], { radius: 6, color: '#fff', weight: 3, fillColor: '#1c2420', fillOpacity: 1, interactive: false }).addTo(map);
+
+  fetch('data.json?t=' + Date.now()).then(function (r) {
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(init).catch(function () {
+    document.getElementById('updated').textContent = '';
+    say('혼잡도 자료(data.json)가 아직 없습니다. 수집 작업이 한 번 끝난 뒤 새로고침하세요.');
+  });
+})();
+</script>
+</body>
+</html>

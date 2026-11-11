@@ -443,7 +443,12 @@
       // 방식 A: 시군구 안 인기 순위가 높은 곳 가운데 그날 덜 붐비는 곳
       var pickA = function (maxRate) {
         var per = {}, out = [];
-        pool.filter(function (o) { var rk = data.spots[o.i][10]; return rk > 0 && rk <= 40 && o.v <= maxRate; })
+        pool.filter(function (o) {
+          var t = data.spots[o.i], rk = t[10];
+          // 시장·기타 유형은 사용자가 그 유형을 직접 고른 경우에만 추천에 넣는다. 주말에 한산해지는 평일형 장소도 뺀다.
+          if (!gOn && (t[4] === 7 || t[4] === 8)) return false;
+          return rk > 0 && rk <= 40 && o.v <= maxRate && o.lift >= 0;
+        })
           .map(function (o) {
             var rk = data.spots[o.i][10];
             o.rank = rk;

@@ -456,6 +456,13 @@ def main():
     except Exception:
         old = None
 
+    # 예약 실행은 하루에 여러 번 걸어 둔다(GitHub 예약이 가끔 빠지므로). 오늘 자료가 이미 있으면 바로 끝낸다.
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    if old and not os.environ.get("FORCE") and str(old.get("updated", "")).startswith(today) \
+            and (old.get("days") or [""])[0] == today:
+        log("오늘(%s) 자료가 이미 있어 건너뜁니다." % today)
+        return 0
+
     log("1) 혼잡도 수집: 시군구 %d곳" % len(sigungu))
     rates, sgnames, failed = load_rates(sigungu)
     n_spots = sum(len(v) for v in rates.values())

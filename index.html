@@ -432,7 +432,7 @@
   // 지역 거점 순위. 쇼핑(시장·백화점)은 유형 필터에서 '쇼핑·시장'을 켰을 때만 쇼핑끼리의 순위로 쓴다.
   function rankOf(s) {
     if (!(s[10] > 0)) return 0;
-    if (s[11]) return state.grp[7] ? s[10] : 0;
+    if (s[11]) return state.grp[7] && Object.keys(state.grp).length < data.groups.length ? s[10] : 0;
     return s[10];
   }
   function popTag(s) {
@@ -520,6 +520,7 @@
       pool.push({ i: i, d: d, day: bd, v: r[bd], peak: peak, lift: lift, score: (peak - r[bd]) - Math.min(d / span, 1) * 10 });
     }
     var hasRank = !!(data.stats && data.stats.ranked);
+    var gNarrow = gOn > 0 && gOn < data.groups.length;
     if (hasRank) {
       // 방식 A: 시군구 안 인기 순위가 높은 곳 가운데 그날 덜 붐비는 곳
       var pickA = function (maxRate) {
@@ -527,7 +528,7 @@
         pool.filter(function (o) {
           var t = data.spots[o.i], rk = rankOf(t);
           // 시장·기타 유형은 사용자가 그 유형을 직접 고른 경우에만 추천에 넣는다. 주말에 한산해지는 평일형 장소도 뺀다.
-          if (!gOn && (t[4] === 7 || t[4] === 8)) return false;
+          if (!gNarrow && (t[4] === 7 || t[4] === 8)) return false;
           return rk > 0 && rk <= 40 && o.v <= maxRate && o.lift >= 0;
         })
           .map(function (o) {
@@ -709,10 +710,22 @@
         lvBtns.forEach(function (x) { x.b.setAttribute('aria-pressed', state.level === x.k ? 'true' : 'false'); });
       });
     Array.prototype.forEach.call(document.querySelectorAll('#lvRow .chip'), function (b, i) { lvBtns.push({ b: b, k: i === 0 ? 2 : 1 }); });
+    // 유형: '전체'를 누르면 모두 켜지고, 거기서 필요 없는 유형만 눌러 뺀다. 아무것도 안 켜면 전체와 같다.
+    function syncGrp() {
+      var btns = document.querySelectorAll('#grpRow .chip'), n = Object.keys(state.grp).length;
+      btns[0].setAttribute('aria-pressed', n === d.groups.length ? 'true' : 'false');
+      for (var i = 1; i < btns.length; i++) btns[i].setAttribute('aria-pressed', state.grp[i - 1] ? 'true' : 'false');
+    }
+    chips('grpRow', [{ key: 'all', label: '전체' }], {}, function () {
+      var all = Object.keys(state.grp).length === d.groups.length;
+      state.grp = {};
+      if (!all) d.groups.forEach(function (g, i) { state.grp[i] = 1; });
+      syncGrp();
+    });
     chips('grpRow', d.groups.map(function (g, i) { return { key: i, label: g }; }), state.grp,
-      function (k, b) {
+      function (k) {
         if (state.grp[k]) delete state.grp[k]; else state.grp[k] = 1;
-        b.setAttribute('aria-pressed', state.grp[k] ? 'true' : 'false');
+        syncGrp();
       });
 
     Array.prototype.forEach.call(document.querySelectorAll('.seg button'), function (b) {

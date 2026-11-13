@@ -1,7 +1,7 @@
 {
   "name": "한산지도",
   "short_name": "한산지도",
-  "id": "./",
+  "id": "/hansan/map-v2",
   "start_url": "./index.html",
   "scope": "./index.html",
   "display": "standalone",

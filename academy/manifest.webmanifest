@@ -1,7 +1,7 @@
 {
   "name": "학원 회차 관리",
   "short_name": "학원회차",
-  "id": "./",
+  "id": "/hansan/academy/app",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

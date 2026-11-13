@@ -9,7 +9,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;   // 그 밖의 요청은 손대지 않는다
   const key = url.origin + url.pathname;   // ?t=... 같은 꼬리표는 떼고 저장 (파일마다 한 벌만 보관)
   e.respondWith(
-    fetch(req).then((res) => {
+    fetch(req, { cache: 'no-cache' }).then((res) => {   // 폰에 저장된 옛 파일 대신 서버에 매번 최신인지 확인
       if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(key, copy)); }
       return res;
     }).catch(() => caches.match(key).then((hit) => hit || Response.error()))

@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>급여 달력</title>
+  <meta name="theme-color" content="#059669">
+  <meta name="robots" content="noindex">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #0f172a;
+      color: #0f172a;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      width: 100%;
+      min-height: 100vh;
+      background-color: #f8fafc;
+      padding: 12px 8px 50px 8px;
+      display: flex;
+      flex-direction: column;
+    }
+    h1 {
+      font-size: 1.8rem;
+      text-align: center;
+      margin: 6px 0 10px 0;
+      color: #1e1b4b;
+      font-weight: 800;
+    }
+    .status-area {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      padding: 0 2px;
+      gap: 6px;
+    }
+    .save-badge {
+      display: inline-block;
+      font-size: 0.85rem;
+      font-weight: 800;
+      padding: 6px 10px;
+      border-radius: 20px;
+      background: #e2e8f0;
+      color: #475569;
+    }
+    .save-badge.saving { background: #fef3c7; color: #b45309; }
+    .save-badge.saved { background: #dcfce7; color: #15803d; }
+    .save-badge.error { background: #fee2e2; color: #b91c1c; }
+
+    .btn-top-group { display: flex; gap: 6px; }
+    .top-btn {
+      border: none;
+      border-radius: 10px;
+      padding: 6px 10px;
+      font-size: 0.85rem;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .btn-reset { background: #e2e8f0; color: #475569; }
+    .btn-reset:active { background: #cbd5e1; }
+    .btn-save { background: #3b82f6; color: white; }
+    .btn-save:active { background: #1d4ed8; }
+
+    .period-selector {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #ffffff;
+      border: 3px solid #e2e8f0;
+      border-radius: 16px;
+      padding: 10px 14px;
+      margin-bottom: 12px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.03);
+    }
+    .period-btn {
+      background: #4f46e5;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 1.05rem;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .period-btn:active { background: #3730a3; }
+    .period-text-wrap { text-align: center; }
+    .period-title { font-size: 1.4rem; font-weight: 800; color: #0f172a; }
+    .period-sub { font-size: 0.9rem; color: #64748b; font-weight: 600; margin-top: 2px; }
+
+    .summary-card {
+      background: #ffffff;
+      border-left: 14px solid #4f46e5;
+      border-radius: 18px;
+      padding: 16px 14px;
+      margin-bottom: 14px;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.05);
+      border-top: 2px solid #e2e8f0;
+      border-right: 2px solid #e2e8f0;
+      border-bottom: 2px solid #e2e8f0;
+    }
+    .summary-title { font-size: 1.05rem; color: #64748b; font-weight: 700; }
+    .summary-amount { font-size: 2rem; font-weight: 900; color: #4f46e5; margin: 4px 0 2px 0; }
+    .summary-sub { font-size: 1.15rem; color: #1e293b; font-weight: 700; }
+    .copy-btn {
+      background: #10b981;
+      color: white;
+      border: none;
+      width: 100%;
+      padding: 15px;
+      font-size: 1.15rem;
+      font-weight: bold;
+      border-radius: 12px;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+    .copy-btn:active { background: #059669; }
+
+    /* 비대칭 7열 그리드: 일(0.65fr), 월~금(각 1fr), 토(0.65fr) */
+    .cal-header {
+      display: grid;
+      grid-template-columns: 0.65fr 1fr 1fr 1fr 1fr 1fr 0.65fr;
+      gap: 4px;
+      text-align: center;
+      font-weight: 800;
+      font-size: 0.95rem;
+      color: #334155;
+      margin-bottom: 6px;
+      background: #e2e8f0;
+      padding: 8px 0;
+      border-radius: 10px;
+    }
+    .cal-header .col-sun { color: #dc2626; }
+    .cal-header .col-sat { color: #2563eb; }
+
+    .cal-grid {
+      display: grid;
+      grid-template-columns: 0.65fr 1fr 1fr 1fr 1fr 1fr 0.65fr;
+      gap: 4px;
+    }
+    .cal-cell-empty { background: transparent; }
+    .cal-grid > *, .cal-header > * { min-width: 0; }   /* 좁은 화면에서 토요일 칸이 밀려나지 않게 */
+    .cal-cell { overflow: hidden; }
+    /* ---- 휴대폰 화면 폭 기준으로 다시 맞춘 크기 ---- */
+    .cal-header, .cal-grid { grid-template-columns: 0.8fr 1fr 1fr 1fr 1fr 1fr 0.8fr !important; gap: 3px !important; }
+    .container { padding-left: 6px !important; padding-right: 6px !important; }
+    .cal-cell { padding: 5px 2px !important; min-height: 118px !important; }
+    .cell-top { flex-direction: column; align-items: center !important; gap: 3px; }
+    .date-wrap { align-items: center !important; }
+    .month-tag { display: none; }                       /* 월은 위의 구분 띠에 이미 표시됨 */
+    .cell-date { font-size: 1.35rem !important; }
+    .cell-badge { font-size: 0.72rem !important; padding: 2px 5px !important; white-space: nowrap; }
+    .cell-holiday-name { font-size: 0.62rem !important; max-width: none !important; text-align: center; }
+    .cell-hours { font-size: 1.1rem !important; }
+    .cell-hours.off-text { font-size: 0.9rem !important; }
+    .cell-btn-group { gap: 2px; }
+    .adj-btn { font-size: 0.72rem !important; padding: 6px 0 !important; letter-spacing: -0.5px; }
+    .cal-cell.weekend-cell .cell-btn-group { flex-direction: column; }
+    .memo-btn { font-size: 0.72rem; padding: 5px 0; }
+    .cal-cell.off .cell-btn-group { visibility: hidden; }   /* 휴무일엔 시간 버튼을 숨겨, 칸 어디를 눌러도 근무로 바뀌게 */
+    .top-btn, .save-badge { white-space: nowrap; font-size: 0.8rem !important; padding: 7px 8px !important; }
+    .status-area { flex-wrap: wrap; }
+    .period-btn { white-space: nowrap; padding: 12px 10px !important; }
+    .period-title { font-size: 1.25rem !important; white-space: nowrap; }
+    .period-sub { white-space: nowrap; font-size: 0.8rem !important; }
+
+    .month-divider {
+      grid-column: span 7;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 8px 0 4px 0;
+      padding: 7px 0;
+      border-radius: 10px;
+      font-weight: 800;
+      font-size: 1rem;
+    }
+    .divider-prev {
+      background: #ffedd5;
+      border: 2px dashed #f97316;
+      color: #9a3412;
+    }
+    .divider-curr {
+      background: #e0e7ff;
+      border: 2px dashed #6366f1;
+      color: #3730a3;
+      margin-top: 14px;
+    }
+
+    .cal-cell {
+      border-radius: 10px;
+      padding: 5px 3px;
+      min-height: 105px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+      user-select: none;
+    }
+    .cal-cell.prev-month {
+      background: #f8fafc;
+      border: 2px solid #cbd5e1;
+    }
+    .cal-cell.prev-month .month-tag { background: #fed7aa; color: #9a3412; }
+    .cal-cell.curr-month {
+      background: #ffffff;
+      border: 2px solid #818cf8;
+    }
+    .cal-cell.curr-month .month-tag { background: #c7d2fe; color: #3730a3; }
+
+    /* 주말 셀 특화 */
+    .cal-cell.weekend-cell {
+      background: #f1f5f9;
+      border: 1.5px dashed #cbd5e1;
+      padding: 4px 2px;
+    }
+    .cal-cell.weekend-cell.sat .cell-date { color: #2563eb; }
+    .cal-cell.weekend-cell.sun .cell-date { color: #dc2626; }
+
+    .cal-cell.off {
+      background: #f8fafc !important;
+      border-color: #e2e8f0 !important;
+      opacity: 0.65;
+    }
+
+    .cell-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .date-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .month-tag {
+      font-size: 0.62rem;
+      font-weight: 800;
+      padding: 1px 3px;
+      border-radius: 3px;
+      margin-bottom: 2px;
+    }
+    .cell-date {
+      font-size: 1.15rem;
+      font-weight: 900;
+      color: #0f172a;
+      line-height: 1;
+    }
+    .cell-holiday-name {
+      font-size: 0.6rem;
+      font-weight: 800;
+      color: #dc2626;
+      margin-top: 2px;
+      line-height: 1.1;
+      max-width: 48px;
+      word-break: keep-all;
+    }
+    .cell-badge {
+      font-size: 0.65rem;
+      font-weight: 800;
+      padding: 1px 3px;
+      border-radius: 4px;
+    }
+    .badge-on { background: #dcfce7; color: #166534; }
+    .badge-off { background: #fee2e2; color: #991b1b; }
+
+    .cell-mid {
+      text-align: center;
+      margin: 2px 0;
+    }
+    .cell-hours {
+      font-size: 1.05rem;
+      font-weight: 900;
+      color: #1e293b;
+    }
+    .cell-hours.off-text {
+      color: #94a3b8;
+      font-size: 0.85rem;
+    }
+    .cell-btn-group {
+      display: flex;
+      justify-content: space-between;
+      gap: 2px;
+    }
+    .adj-btn {
+      background: #e2e8f0;
+      color: #0f172a;
+      border: 1px solid #cbd5e1;
+      font-size: 0.72rem;
+      font-weight: bold;
+      padding: 4px 1px;
+      flex: 1;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .adj-btn:active { background: #94a3b8; color: white; }
+    .weekend-btn-mini {
+      font-size: 0.65rem;
+      padding: 3px 0;
+    }
+    /* 오늘 날짜 */
+    .cal-cell.today { outline: 3px solid #f59e0b; outline-offset: -1px; }
+    /* 메모 */
+    .memo-btn {
+      width: 100%;
+      margin-top: 2px;
+      background: #f1f5f9;
+      color: #64748b;
+      border: 1px dashed #cbd5e1;
+      border-radius: 5px;
+      font-size: 0.68rem;
+      font-weight: bold;
+      padding: 3px 0;
+      cursor: pointer;
+    }
+    .memo-btn.has { background: #fef3c7; color: #92400e; border: 1px solid #f59e0b; }
+    .memo-title { font-weight: 800; color: #334155; margin: 16px 2px 6px; font-size: 1rem; }
+    .memo-row {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      font-size: 0.95rem;
+      color: #1e293b;
+      cursor: pointer;
+      overflow-wrap: anywhere;
+    }
+    .memo-row b { color: #92400e; margin-right: 6px; }
+    /* 연간 누계 */
+    .year-btn {
+      background: #e0e7ff;
+      color: #3730a3;
+      border: none;
+      width: 100%;
+      padding: 12px;
+      font-size: 1.05rem;
+      font-weight: bold;
+      border-radius: 12px;
+      margin-top: 8px;
+      cursor: pointer;
+    }
+    #yearPanel { display: none; margin-top: 10px; }
+    .year-title { font-weight: 800; color: #1e1b4b; margin-bottom: 6px; }
+    .year-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    .year-table th, .year-table td { padding: 7px 4px; text-align: right; border-bottom: 1px solid #e2e8f0; }
+    .year-table th:first-child, .year-table td:first-child { text-align: left; }
+    .year-table th { color: #64748b; font-size: 0.85rem; }
+    .year-table tr.sum td { font-weight: 900; color: #4f46e5; border-top: 2px solid #4f46e5; border-bottom: none; }
+    .year-note { font-size: 0.8rem; color: #64748b; margin-top: 6px; }
+    .load-error {
+      grid-column: span 7;
+      text-align: center;
+      padding: 30px 12px;
+      color: #b91c1c;
+      font-weight: 700;
+      background: #fee2e2;
+      border-radius: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🗓️ 급여 달력</h1>
+    <button id="installBar" onclick="doInstall()" style="display:none; background:#059669; color:#fff; border:none; width:100%; font-size:1.05rem; font-weight:bold; padding:13px 10px; border-radius:12px; margin-bottom:10px; cursor:pointer;">📲 이 화면을 앱으로 설치하기</button>
+    <div id="setupBox" style="display:none; background:#fff; border:2px solid #e2e8f0; border-radius:16px; padding:18px 14px; margin-bottom:12px;"></div>
+    <div id="mainArea">
+
+    <div class="status-area">
+      <span class="save-badge" id="saveBadge">불러오는 중… ⏳</span>
+      <div class="btn-top-group">
+        <button class="top-btn btn-reset" onclick="resetCurrentPeriod()">🔄 주말/공휴일 재적용</button>
+        <button class="top-btn btn-save" onclick="saveToServerNow(true)">💾 즉시 저장</button>
+      </div>
+    </div>
+
+    <div class="period-selector">
+      <button class="period-btn" onclick="changePeriod(-1)">◀ 이전</button>
+      <div class="period-text-wrap">
+        <div class="period-title" id="periodTitle">2026년 10월 정산</div>
+        <div class="period-sub" id="periodSub">9.13 ~ 10.12 (10월 12일 지급)</div>
+      </div>
+      <button class="period-btn" onclick="changePeriod(1)">다음 ▶</button>
+    </div>
+
+    <div class="summary-card">
+      <div class="summary-title" id="summaryTitle">지급 예정 급여 (시급 18,000원)</div>
+      <div class="summary-amount" id="totalAmount">0원</div>
+      <div class="summary-sub" id="totalDays">총 근무: 0일 (0시간)</div>
+      <button class="copy-btn" onclick="copyStatement()">📋 카톡/문자용 명세 복사</button>
+      <button class="year-btn" onclick="toggleYear()">📊 올해 지급 누계 보기</button>
+      <div id="yearPanel"></div>
+    </div>
+
+    <!-- 7열 헤더: 일 ~ 토 -->
+    <div class="cal-header">
+      <div class="col-sun">일</div>
+      <div>월</div>
+      <div>화</div>
+      <div>수</div>
+      <div>목</div>
+      <div>금</div>
+      <div class="col-sat">토</div>
+    </div>
+
+    <div class="cal-grid" id="calGrid">
+      <div style="grid-column: span 7; text-align:center; padding:40px; color:#64748b;">공휴일 및 급여 데이터 조회 중...</div>
+    </div>
+    <div id="memoList"></div>
+    </div>
+    <div style="text-align:center; margin-top:18px;"><a href="#" onclick="resetSetup(); return false;" style="color:#94a3b8; font-size:0.8rem;">연결 주소 다시 설정</a></div>
+  </div>
+
+  <script>
+    // ================= 설치형 앱 전용: 구글 시트와 연결하는 부분 =================
+    // 연결 주소(Apps Script 웹앱 주소)는 이 파일에 적지 않고, 처음 한 번 입력받아 이 휴대폰에만 저장한다.
+    // 이 파일은 누구나 볼 수 있는 곳(GitHub)에 있으므로 주소를 여기에 적으면 안 된다.
+    const API_KEY_NAME = 'pay_api_url';
+    function apiUrl() {
+      try { return localStorage.getItem(API_KEY_NAME) || ''; } catch (e) { return ''; }
+    }
+    function validApiUrl(u) {
+      return /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(u);
+    }
+    (function () {   // 설치 링크(…/pay/#u=연결주소)로 열면 주소를 자동 저장
+      const m = location.hash.match(/^#u=(.+)$/);
+      if (!m) return;
+      const u = decodeURIComponent(m[1]).trim();
+      if (validApiUrl(u)) { try { localStorage.setItem(API_KEY_NAME, u); } catch (e) {} }
+      history.replaceState(null, '', location.pathname);
+    })();
+
+    function callApi(fn, args) {
+      return fetch(apiUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },   // 구글 웹앱은 이 형식이어야 다른 사이트에서 호출된다
+        body: JSON.stringify({ fn: fn, args: args }),
+        redirect: 'follow'
+      }).then(function (r) {
+        if (!r.ok) throw new Error('서버 응답 오류 (' + r.status + ')');
+        return r.json();
+      }, function () {
+        throw new Error('연결하지 못했습니다. 인터넷 연결을 확인해 주세요.');
+      }).then(function (out) {
+        if (!out || !out.ok) throw new Error((out && out.error) || '알 수 없는 오류');
+        return out.data;
+      });
+    }
+    // 기존 화면 코드가 쓰는 google.script.run 과 같은 모양으로 감싼다 (화면 코드를 그대로 쓰기 위해)
+    function makeRunner(ok, fail) {
+      return new Proxy({}, { get: function (_, name) {
+        if (name === 'withSuccessHandler') return function (f) { return makeRunner(f, fail); };
+        if (name === 'withFailureHandler') return function (f) { return makeRunner(ok, f); };
+        return function () {
+          callApi(name, Array.prototype.slice.call(arguments)).then(
+            function (d) { if (ok) ok(d); },
+            function (e) { if (fail) fail(e); });
+        };
+      } });
+    }
+    window.google = { script: { run: makeRunner(null, null) } };
+
+    function showSetup(msg) {
+      document.getElementById('mainArea').style.display = 'none';
+      const box = document.getElementById('setupBox');
+      box.style.display = 'block';
+      box.innerHTML =
+        '<div style="font-size:1.2rem; font-weight:800; margin-bottom:8px; color:#1e293b;">🔗 처음 한 번만 연결하기</div>' +
+        '<div style="font-size:0.95rem; color:#475569; margin-bottom:12px; line-height:1.5;">급여 달력 Apps Script 에서 복사한 <b>웹 앱 주소</b>를 붙여넣어 주세요. 이 휴대폰에만 저장됩니다.</div>' +
+        (msg ? '<div style="background:#fee2e2; color:#991b1b; border-radius:10px; padding:10px; font-weight:700; margin-bottom:10px; font-size:0.9rem;">' + esc(msg) + '</div>' : '') +
+        '<input type="url" id="apiInput" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false" style="width:100%; padding:13px; font-size:1rem; border:2px solid #cbd5e1; border-radius:12px; margin-bottom:10px;">' +
+        '<button onclick="saveSetup()" style="width:100%; padding:14px; font-size:1.1rem; font-weight:bold; background:#4f46e5; color:#fff; border:none; border-radius:12px;">연결하기</button>';
+    }
+    function saveSetup() {
+      const u = document.getElementById('apiInput').value.trim();
+      if (!validApiUrl(u)) { showSetup('주소 형식이 맞지 않습니다. https://script.google.com/macros/s/ 로 시작하고 /exec 로 끝나야 합니다.'); return; }
+      try { localStorage.setItem(API_KEY_NAME, u); } catch (e) { showSetup('이 브라우저에 저장할 수 없습니다 (시크릿 모드인지 확인).'); return; }
+      document.getElementById('setupBox').innerHTML = '<div style="text-align:center; padding:20px; color:#64748b;">연결 확인 중...</div>';
+      // 급여 달력 서버가 맞는지 확인: 연간 누계를 한 번 불러 본다 (학원 회차 주소를 잘못 넣은 경우를 걸러냄)
+      callApi('getYearSummary', [new Date().getFullYear()]).then(function () {
+        document.getElementById('setupBox').style.display = 'none';
+        document.getElementById('mainArea').style.display = '';
+        updatePeriodView();
+      }, function (e) {
+        try { localStorage.removeItem(API_KEY_NAME); } catch (x) {}
+        showSetup('연결에 실패했습니다: ' + e.message + ' — 급여 달력의 웹 앱 주소가 맞는지, 배포 설정(액세스: 모든 사용자)을 확인해 주세요.');
+      });
+    }
+    function resetSetup() {
+      if (!confirm("이 휴대폰에 저장된 연결 주소를 지우고 다시 설정할까요?\n(급여 기록은 지워지지 않습니다)")) return;
+      flushSave();
+      try { localStorage.removeItem(API_KEY_NAME); } catch (e) {}
+      loadOk = false; loadToken++;
+      showSetup('');
+    }
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+
+    // 화면 안의 설치 버튼 (크롬 154~156 은 같은 사이트에 다른 앱이 설치돼 있으면 메뉴의 "설치"가 막히므로 이 경로로 설치)
+    let installEvent = null;
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      installEvent = e;
+      document.getElementById('installBar').style.display = 'block';
+    });
+    window.addEventListener('appinstalled', function () {
+      installEvent = null;
+      document.getElementById('installBar').style.display = 'none';
+    });
+    function doInstall() {
+      if (!installEvent) return;
+      const ev = installEvent;
+      installEvent = null;
+      document.getElementById('installBar').style.display = 'none';
+      ev.prompt();
+    }
+    // ================= 여기부터는 Apps Script 화면과 같은 코드 =================
+
+    // 시급이 바뀌면 아래에 한 줄 추가하세요. 예) { from: "2027-03", rate: 19000 }  → 2027년 3월 정산부터 19,000원
+    // 이전 달 정산은 예전 시급 그대로 계산됩니다.
+    const RATE_HISTORY = [
+      { from: "2000-01", rate: 18000 }
+    ];
+    const DEFAULT_HOURS = 4.5;
+
+    let targetYear = 2026;
+    let targetMonth = 10;
+    let currentKey = "";
+    let daysData = [];
+    let currentHolidays = {};
+    let loadOk = false;      // 불러오기에 성공한 달만 저장할 수 있다
+    let loadToken = 0;       // 달을 빨리 넘길 때 늦게 도착한 응답을 버리기 위한 번호
+
+    function rateFor(key) {
+      let rate = RATE_HISTORY[0].rate;
+      RATE_HISTORY.forEach(r => { if (r.from <= key) rate = r.rate; });
+      return rate;
+    }
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+    function ymd(d) {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    function calcTotals() {
+      let days = 0, hours = 0;
+      daysData.forEach(item => { if (item.isWork) { days++; hours += item.hours; } });
+      hours = Math.round(hours * 10) / 10;
+      return { days: days, hours: hours, amount: Math.round(hours * rateFor(currentKey)) };
+    }
+
+    window.onload = function() {
+      const now = new Date();
+      // 13일부터는 다음 달 정산 기간이므로 그 달을 먼저 보여준다
+      const d = new Date(now.getFullYear(), now.getMonth() + (now.getDate() >= 13 ? 1 : 0), 1);
+      targetYear = d.getFullYear();
+      targetMonth = d.getMonth() + 1;
+      if (!apiUrl()) showSetup(''); else updatePeriodView();
+    };
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'hidden') flushSave();
+    });
+
+    function updatePeriodView() {
+      currentKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
+      const prevM = new Date(targetYear, targetMonth - 2, 1).getMonth() + 1;
+      document.getElementById('periodTitle').innerText = `${targetYear}년 ${targetMonth}월 정산`;
+      document.getElementById('periodSub').innerText = `${prevM}.13 ~ ${targetMonth}.12 (${targetMonth}월 12일 지급)`;
+      document.getElementById('summaryTitle').innerText = `지급 예정 급여 (시급 ${rateFor(currentKey).toLocaleString()}원)`;
+      document.getElementById('yearPanel').style.display = 'none';
+      loadData();
+    }
+
+    function changePeriod(delta) {
+      flushSave();   // 넘기기 전에 이 달의 변경분을 먼저 보낸다
+      const d = new Date(targetYear, targetMonth - 1 + delta, 1);
+      targetYear = d.getFullYear();
+      targetMonth = d.getMonth() + 1;
+      updatePeriodView();
+    }
+
+    function setSaveStatus(type, msg) {
+      const badge = document.getElementById('saveBadge');
+      badge.className = 'save-badge ' + type;
+      badge.innerText = msg;
+    }
+
+    function loadData() {
+      const token = ++loadToken;
+      loadOk = false;
+      daysData = [];
+      document.getElementById('calGrid').innerHTML = '<div style="grid-column: span 7; text-align:center; padding:40px; color:#64748b;">공휴일 및 급여 데이터 조회 중...</div>';
+      document.getElementById('memoList').innerHTML = '';
+      document.getElementById('totalAmount').innerText = '…';
+      document.getElementById('totalDays').innerText = '불러오는 중';
+      setSaveStatus('', '불러오는 중… ⏳');
+
+      const startStr = ymd(new Date(targetYear, targetMonth - 2, 13));
+      const endStr = ymd(new Date(targetYear, targetMonth - 1, 12));
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (token !== loadToken) return;   // 그 사이 다른 달로 넘어갔으면 버린다
+          const serverData = res.savedData;
+          currentHolidays = res.holidays || {};
+          let autoChanged = false, note = '';
+
+          if (Array.isArray(serverData) && serverData.length >= 28 && serverData[0].dateStr === startStr) {
+            daysData = serverData.map(item => {
+              const wasHoliday = !!item.holidayName;
+              const hName = currentHolidays[item.dateStr] || null;
+              item.holidayName = hName;
+              item.isWeekend = (item.dow === 0 || item.dow === 6);
+              // 저장한 뒤 새로 생긴 공휴일(임시공휴일 등)만 휴무로 바꾼다. 직접 손댄 날과 주말 특근은 건드리지 않는다.
+              if (hName && !wasHoliday && !item.touched && item.isWork && item.hours === DEFAULT_HOURS) {
+                item.isWork = false;
+                item.hours = 0;
+                autoChanged = true;
+              }
+              return item;
+            });
+          } else {
+            if (Array.isArray(serverData) && serverData.length) {
+              note = '저장된 기록의 날짜가 이 정산 기간과 맞지 않아 기본값으로 다시 만들었습니다. 확인 후 수정하세요.';
+            }
+            initPeriodDaysWithHolidays(currentHolidays);
+          }
+          loadOk = true;
+          renderCalendar();
+          if (note) setSaveStatus('error', '⚠️ 기록 확인 필요');
+          else setSaveStatus('saved', '저장 상태: 정상 ✅');
+          if (note) alert(note);
+          if (autoChanged) queueSave(false);
+        })
+        .withFailureHandler(function(err) {
+          if (token !== loadToken) return;
+          loadOk = false;
+          daysData = [];
+          document.getElementById('calGrid').innerHTML =
+            '<div class="load-error">기록을 불러오지 못했습니다.<br><small>' + esc(err && err.message || '') + '</small><br>' +
+            '<button class="top-btn btn-save" style="margin-top:12px; padding:12px 18px; font-size:1rem;" onclick="loadData()">🔄 다시 시도</button></div>';
+          document.getElementById('totalAmount').innerText = '-';
+          document.getElementById('totalDays').innerText = '불러오기 실패';
+          setSaveStatus('error', '불러오기 실패 ⚠️');
+        })
+        .getMonthData(currentKey, startStr, endStr);
+    }
+
+    function resetCurrentPeriod() {
+      if (!loadOk) return;
+      if (confirm("이 달의 모든 날짜를 기본 상태(평일 근무, 주말/공휴일 휴무)로 초기화하시겠습니까?\n(메모는 그대로 둡니다)")) {
+        const memos = {};
+        daysData.forEach(item => { if (item.memo) memos[item.dateStr] = item.memo; });
+        initPeriodDaysWithHolidays(currentHolidays);
+        daysData.forEach(item => { if (memos[item.dateStr]) item.memo = memos[item.dateStr]; });
+        renderCalendar();
+        queueSave(false);
+      }
+    }
+
+    function initPeriodDaysWithHolidays(holidays) {
+      daysData = [];
+      const startDate = new Date(targetYear, targetMonth - 2, 13);
+      const endDate = new Date(targetYear, targetMonth - 1, 12);
+      const dowNames = ['일', '월', '화', '수', '목', '금', '토'];
+
+      let cur = new Date(startDate);
+      while (cur <= endDate) {
+        const dow = cur.getDay(); // 0(일) ~ 6(토)
+        const isWeekend = (dow === 0 || dow === 6);
+        const dateStr = ymd(cur);
+        const holidayName = holidays[dateStr] || null;
+        const defaultWork = (!isWeekend && !holidayName);
+
+        daysData.push({
+          dateStr: dateStr,
+          month: cur.getMonth() + 1,
+          day: cur.getDate(),
+          dow: dow,
+          dowName: dowNames[dow],
+          holidayName: holidayName,
+          isWeekend: isWeekend,
+          isWork: defaultWork,
+          hours: defaultWork ? DEFAULT_HOURS : 0
+        });
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+
+    function toggleWork(idx) {
+      if (!loadOk) return;
+      const item = daysData[idx];
+      item.isWork = !item.isWork;
+      item.touched = true;
+      if (item.isWork && item.hours === 0) {
+        item.hours = DEFAULT_HOURS;
+      }
+      renderCalendar();
+      queueSave(false);
+    }
+
+    function adjustHours(event, idx, delta) {
+      event.stopPropagation();
+      if (!loadOk) return;
+      const item = daysData[idx];
+      if (!item.isWork) return;
+
+      let newH = item.hours + delta;
+      if (newH < 0.5) newH = 0.5;
+      if (newH > 12) newH = 12;
+
+      item.hours = Math.round(newH * 10) / 10;
+      item.touched = true;
+      renderCalendar();
+      queueSave(false);
+    }
+
+    function editMemo(event, idx) {
+      if (event) event.stopPropagation();
+      if (!loadOk) return;
+      const item = daysData[idx];
+      const input = prompt(`${item.month}/${item.day}(${item.dowName}) 메모\n(비우고 확인을 누르면 메모가 지워집니다)`, item.memo || '');
+      if (input === null) return;   // 취소
+      const text = input.trim().slice(0, 100);
+      if (text) item.memo = text; else delete item.memo;
+      renderCalendar();
+      queueSave(false);
+    }
+
+    // ---------- 저장: 연속으로 눌러도 순서대로 한 번씩만 보낸다 ----------
+    let saveTimer = null, saving = false, pendingJob = null, retryJob = null;   // retryJob: 저장에 실패해 다시 보내야 하는 것
+
+    function queueSave(isManual) {
+      if (!loadOk) {
+        setSaveStatus('error', '불러오기 실패 상태 — 저장하지 않음');
+        if (isManual) alert("기록을 불러오지 못한 상태라 저장하지 않았습니다.\n'다시 시도'를 눌러 주세요.");
+        return;
+      }
+      const t = calcTotals();
+      pendingJob = {
+        key: currentKey, json: JSON.stringify(daysData), days: t.days, salary: t.amount,
+        manual: isManual || (pendingJob && pendingJob.key === currentKey && pendingJob.manual) || false
+      };
+      setSaveStatus('saving', '구글 시트에 저장 중... ⏳');
+      clearTimeout(saveTimer);
+      if (isManual) flushSave(); else saveTimer = setTimeout(flushSave, 600);
+    }
+
+    function flushSave() {
+      clearTimeout(saveTimer);
+      if (saving) return;
+      if (retryJob && pendingJob && retryJob.key === pendingJob.key) retryJob = null;   // 같은 달이면 최신 내용이 우선
+      let job;
+      if (retryJob && pendingJob) { job = retryJob; retryJob = null; }   // 실패했던 다른 달부터 다시 보낸다
+      else if (pendingJob) { job = pendingJob; pendingJob = null; }
+      else return;
+      saving = true;
+      google.script.run
+        .withSuccessHandler(function() {
+          saving = false;
+          if (pendingJob) { flushSave(); }
+          else if (job.key === currentKey && loadOk) setSaveStatus('saved', '저장 완료 ✅');
+          if (job.manual) alert("구글 스프레드시트에 성공적으로 저장되었습니다!");
+        })
+        .withFailureHandler(function(err) {
+          saving = false;
+          if (!(pendingJob && pendingJob.key === job.key)) retryJob = job;   // 다음 저장 때 다시 보낸다
+          if (pendingJob && pendingJob.key === job.key) { flushSave(); return; }
+          setSaveStatus('error', '저장 오류 — 💾 즉시 저장을 눌러 주세요');
+          if (job.manual) alert("저장하지 못했습니다: " + (err && err.message || ''));
+        })
+        .saveMonthData(job.key, job.json, job.days, job.salary);
+    }
+
+    function saveToServerNow(isManual) { queueSave(isManual); }
+
+    function renderCalendar() {
+      const grid = document.getElementById('calGrid');
+      let html = '';
+
+      if (daysData.length === 0) {
+        grid.innerHTML = '<div style="grid-column: span 7; text-align:center; padding:20px;">내역이 없습니다.</div>';
+        return;
+      }
+
+      const todayStr = ymd(new Date());
+      const startMonth = daysData[0].month;
+      html += `<div class="month-divider divider-prev">📅 ${startMonth}월 근무 시작 (13일~)</div>`;
+
+      // 일요일 기준 오프셋 (일=0, 월=1, ... 토=6)
+      const firstCol = daysData[0].dow;
+      for (let i = 0; i < firstCol; i++) {
+        html += '<div class="cal-cell-empty"></div>';
+      }
+
+      let hasRenderedSecondDivider = false;
+      let currentCol = firstCol;
+      let memoHtml = '';
+
+      daysData.forEach((item, idx) => {
+        // 당월 시작 배너
+        if (!hasRenderedSecondDivider && item.month === targetMonth) {
+          if (currentCol > 0) {
+            for (let c = currentCol; c < 7; c++) {
+              html += '<div class="cal-cell-empty"></div>';
+            }
+          }
+          html += `<div class="month-divider divider-curr">📅 ${item.month}월 근무 시작 (1일~12일)</div>`;
+          const targetCol = item.dow;
+          for (let c = 0; c < targetCol; c++) {
+            html += '<div class="cal-cell-empty"></div>';
+          }
+          currentCol = targetCol;
+          hasRenderedSecondDivider = true;
+        }
+
+        const isCurrMonth = (item.month === targetMonth);
+        const monthClass = isCurrMonth ? 'curr-month' : 'prev-month';
+        const weekendClass = item.isWeekend ? (item.dow === 6 ? 'weekend-cell sat' : 'weekend-cell sun') : '';
+        const todayClass = item.dateStr === todayStr ? 'today' : '';
+        const holidayLabel = item.holidayName ? `<div class="cell-holiday-name">${esc(item.holidayName)}</div>` : '';
+        const memoLabel = item.memo ? '📝' : (item.isWeekend ? '✎' : '메모');
+
+        html += `
+          <div class="cal-cell ${monthClass} ${weekendClass} ${todayClass} ${item.isWork ? '' : 'off'}" onclick="toggleWork(${idx})">
+            <div class="cell-top">
+              <div class="date-wrap">
+                <span class="month-tag">${item.month}월</span>
+                <span class="cell-date">${item.day}</span>
+                ${holidayLabel}
+              </div>
+              <span class="cell-badge ${item.isWork ? 'badge-on' : 'badge-off'}">
+                ${item.isWork ? '근무' : '휴무'}
+              </span>
+            </div>
+
+            <div class="cell-mid">
+              <div class="cell-hours ${item.isWork ? '' : 'off-text'}">
+                ${item.isWork ? item.hours + 'h' : '0h'}
+              </div>
+            </div>
+
+            <div>
+              <div class="cell-btn-group">
+                <button class="adj-btn ${item.isWeekend ? 'weekend-btn-mini' : ''}" onclick="adjustHours(event, ${idx}, -0.5)" ${!item.isWork ? 'disabled' : ''}>-30</button>
+                <button class="adj-btn ${item.isWeekend ? 'weekend-btn-mini' : ''}" onclick="adjustHours(event, ${idx}, 0.5)" ${!item.isWork ? 'disabled' : ''}>+30</button>
+              </div>
+              <button class="memo-btn ${item.memo ? 'has' : ''}" onclick="editMemo(event, ${idx})">${memoLabel}</button>
+            </div>
+          </div>
+        `;
+
+        if (item.memo) {
+          memoHtml += `<div class="memo-row" onclick="editMemo(null, ${idx})"><b>${item.month}/${item.day}(${item.dowName})</b> ${esc(item.memo)}</div>`;
+        }
+        currentCol = (currentCol + 1) % 7;
+      });
+
+      grid.innerHTML = html;
+      document.getElementById('memoList').innerHTML = memoHtml
+        ? '<div class="memo-title">📝 이 달의 메모 (누르면 수정)</div>' + memoHtml : '';
+
+      const t = calcTotals();
+      document.getElementById('totalAmount').innerText = t.amount.toLocaleString() + '원';
+      document.getElementById('totalDays').innerText = `총 근무: ${t.days}일 (${t.hours}시간)`;
+    }
+
+    // ---------- 연간 누계 ----------
+    function toggleYear() {
+      const panel = document.getElementById('yearPanel');
+      if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+      const year = targetYear;
+      panel.style.display = 'block';
+      panel.innerHTML = '<div class="year-note">불러오는 중…</div>';
+      flushSave();
+      google.script.run
+        .withSuccessHandler(function(list) {
+          if (year !== targetYear) return;
+          list = list || [];
+          let days = 0, hours = 0, salary = 0, rows = '';
+          list.forEach(m => {
+            days += m.days; hours += m.hours; salary += m.salary;
+            rows += `<tr><td>${parseInt(m.key.slice(5), 10)}월</td><td>${m.days}일</td><td>${m.hours}h</td><td>${m.salary.toLocaleString()}원</td></tr>`;
+          });
+          panel.innerHTML = list.length
+            ? `<div class="year-title">${year}년 지급 누계</div>
+               <table class="year-table"><tr><th>정산월</th><th>근무</th><th>시간</th><th>지급액</th></tr>${rows}
+               <tr class="sum"><td>합계</td><td>${days}일</td><td>${Math.round(hours * 10) / 10}h</td><td>${salary.toLocaleString()}원</td></tr></table>
+               <div class="year-note">저장된 달만 집계합니다. 방금 고친 내용은 '저장 완료'가 뜬 뒤 다시 열면 반영됩니다.</div>`
+            : `<div class="year-note">${year}년에 저장된 정산 기록이 없습니다.</div>`;
+        })
+        .withFailureHandler(function(err) {
+          panel.innerHTML = '<div class="year-note">누계를 불러오지 못했습니다: ' + esc(err && err.message || '') + '</div>';
+        })
+        .getYearSummary(year);
+    }
+
+    function copyStatement() {
+      if (!loadOk) { alert("기록을 불러온 뒤에 복사할 수 있습니다."); return; }
+      let offList = [];
+      let adjustList = [];
+
+      daysData.forEach(item => {
+        if (item.isWork) {
+          if (item.isWeekend) {
+            adjustList.push(`• ${item.month}/${item.day}(${item.dowName}): ${item.hours}시간 (주말 특근)`);
+          } else if (item.hours !== DEFAULT_HOURS) {
+            const diff = Math.round((item.hours - DEFAULT_HOURS) * 10) / 10;
+            const diffSign = diff > 0 ? `+${diff}` : `${diff}`;
+            const label = diff > 0 ? "연장" : "단축";
+            adjustList.push(`• ${item.month}/${item.day}(${item.dowName}): ${item.hours}시간 (${diffSign}시간 ${label})`);
+          }
+        } else {
+          if (!item.isWeekend) {
+            const reason = item.holidayName ? `(${item.holidayName})` : '';
+            offList.push(`${item.month}/${item.day}${reason}`);
+          }
+        }
+      });
+
+      const t = calcTotals();
+      const prevMonth = (targetMonth === 1) ? 12 : targetMonth - 1;
+
+      let text = `[${targetMonth}월 급여명세서]\n`;
+      text += `• 정산 기간: ${prevMonth}월 13일 ~ ${targetMonth}월 12일 (${targetMonth}월 12일 지급)\n`;
+      text += `• 기본 시급: ${rateFor(currentKey).toLocaleString()}원 (일 ${DEFAULT_HOURS}시간)\n`;
+      text += `• 총 근무: ${t.days}일 (${t.hours}시간)\n`;
+
+      if (adjustList.length > 0) {
+        text += `\n[근무 시간 변동 내역]\n${adjustList.join('\n')}\n`;
+      }
+
+      if (offList.length > 0) {
+        text += `\n• 평일 휴무일: ${offList.join(', ')}\n`;
+      }
+
+      text += `\n• 총 지급액: ${t.amount.toLocaleString()}원\n\n항상 정성껏 돌봐주셔서 진심으로 감사드립니다!`;
+
+      navigator.clipboard.writeText(text).then(() => {
+        alert("급여명세서가 복사되었습니다!\n카톡에 바로 붙여넣기 하시면 됩니다.");
+      }).catch(err => {
+        alert("복사 실패: " + err);
+      });
+    }
+  </script>
+</body>
+</html>

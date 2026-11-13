@@ -78,6 +78,7 @@
   .best b { color: var(--ink); }
   .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; background: #eef1f4; color: var(--sub); margin-left: 4px; }
   .tag.pop { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  #more { display: none; width: 100%; height: 44px; margin-top: 4px; color: var(--accent); }
   .empty, .note { color: var(--sub); font-size: 13px; padding: 14px 4px; }
   .note { padding: 16px 0 0; border-top: 1px solid var(--line); margin-top: 16px; line-height: 1.6; }
   .pop { font-size: 13px; }
@@ -183,6 +184,7 @@
     </div>
   </div>
   <ul id="list"></ul>
+  <button class="btn" type="button" id="more">더 보기</button>
   <p class="note">
     숫자는 한국관광공사 「관광지 집중률 방문자 추이 예측 정보」의 집중률(0~100)입니다. 통신 데이터로 추정한 예측치라 실제와 다를 수 있습니다.
     색 구간(39·69·84)은 이 화면에서 임의로 정한 기준입니다.
@@ -202,6 +204,7 @@
   var COLORS = ['#2f9e62', '#d9a400', '#e8782a', '#d23b3b'];
   var GRAY = '#a9b2ad';
   var LIST_MAX = 80, MARKER_MAX = 2500, POP_MAX = 30;
+  var shown = LIST_MAX, shownKey = '';
 
   var state = { lat: 37.5665, lng: 126.9780, radius: 10, day: 0, sort: 'dist',
                 io: {}, grp: {}, level: 0, pop: false, sel: -1, keep: false, label: '' };
@@ -614,7 +617,7 @@
       ? function (a, b) { return (a.v == null ? 999 : a.v) - (b.v == null ? 999 : b.v) || a.d - b.d; }
       : state.sort === 'pop'
       ? function (a, b) { return (rankOf(a.s) || 999) - (rankOf(b.s) || 999) || a.d - b.d; }
-      : function (a, b) { return a.d - b.d; });
+      : function (a, b) { return (a.s[6] ? 1 : 0) - (b.s[6] ? 1 : 0) || a.d - b.d; });   // 위치가 대략인 곳은 거리가 부정확하므로 뒤로
     return out;
   }
 
@@ -637,10 +640,15 @@
     radiusCircle.setRadius((state.radius || 0) * 1000);
     radiusCircle.setStyle({ opacity: state.radius ? 0.7 : 0, fillOpacity: state.radius ? 0.05 : 0 });
 
+    var key = JSON.stringify([state.lat, state.lng, state.radius, state.day, state.sort, state.io, state.grp, state.level, state.pop]);
+    if (key !== shownKey) { shownKey = key; shown = LIST_MAX; }   // 조건이 바뀌면 처음 80곳부터 다시
     document.getElementById('count').textContent =
-      rows.length + '곳' + (rows.length > LIST_MAX ? ' (목록 ' + LIST_MAX + '곳)' : '');
+      rows.length + '곳' + (rows.length > shown ? ' (목록 ' + shown + '곳)' : '');
+    var more = document.getElementById('more');
+    more.style.display = rows.length > shown ? 'block' : 'none';
+    more.textContent = '더 보기 (' + Math.min(LIST_MAX, rows.length - shown) + '곳 더 · 남은 ' + (rows.length - shown) + '곳)';
     var ul = document.getElementById('list'), h = '';
-    rows.slice(0, LIST_MAX).forEach(function (o) {
+    rows.slice(0, shown).forEach(function (o) {
       var s = o.s, bi = bestDay(s[7]), wi = weekendBest(s[7]);
       h += '<li class="item" data-i="' + o.i + '"><div><div class="name">' + esc(s[0]) +
         '<span class="tag">' + IO[s[5]] + '</span>' + (s[6] ? '<span class="tag">위치 대략</span>' : '') + popTag(s) + '</div>' +
@@ -736,6 +744,8 @@
         render();
       });
     });
+
+    document.getElementById('more').addEventListener('click', function () { shown += LIST_MAX; render(); });
 
     document.getElementById('list').addEventListener('click', function (e) {
       var li = e.target.closest ? e.target.closest('li.item') : null;

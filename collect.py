@@ -498,6 +498,7 @@ def main():
             r = [None if series.get(d) is None else int(round(series[d])) for d in days]
             ov = overrides.get("%s|%s" % (sg, name))
             rec = None
+            fix = ov if isinstance(ov, dict) else None      # {"유형": ..., "장소": ...} : 분류만 바로잡기
             if isinstance(ov, list) and len(ov) >= 2:
                 io = IO_WORD.get(ov[2], IO_UNKNOWN) if len(ov) > 2 else IO_UNKNOWN
                 old_s = prev.get((sg, name))
@@ -519,6 +520,12 @@ def main():
                 if cx is None:
                     continue                    # 시군구 위치조차 모르면 지도에 못 올린다
                 rec = [name, label, round(cy, 5), round(cx, 5), 8, IO_UNKNOWN, 1, r, "", sg]
+            if fix:
+                if fix.get("유형") in GROUPS:
+                    rec[4] = GROUPS.index(fix["유형"])
+                if fix.get("장소") in IO_WORD:
+                    rec[5] = IO_WORD[fix["장소"]]
+                how["fix"] = how.get("fix", 0) + 1
             spots.append(rec)
 
     log("3) 지역 인기 순위(중심 관광지) 반영")

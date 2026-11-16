@@ -1,6 +1,6 @@
 // 설치형 앱(PWA)용 서비스 워커.
 // 항상 인터넷의 최신 파일을 먼저 쓰고, 인터넷이 안 될 때만 마지막으로 받아 둔 파일을 보여준다.
-const CACHE = 'pay-v1';
+const CACHE = 'pay-v2';
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', (e) => {

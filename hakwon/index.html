@@ -255,7 +255,6 @@
     <div id="app" style="width: 100%; flex: 1; display: flex; flex-direction: column;">
       <div class="loading">데이터 불러오는 중...</div>
     </div>
-    <div style="text-align:center; margin-top:18px; color:#94a3b8; font-size:0.8rem;"><a href="#" id="copyApiLink" onclick="copyApiUrl(); return false;" style="color:#94a3b8;">연결 주소 복사</a> &nbsp;·&nbsp; <a href="#" onclick="resetSetup(); return false;" style="color:#94a3b8;">연결 주소 다시 설정</a></div>
   </div>
 
   <script>
@@ -328,20 +327,6 @@
         try { localStorage.removeItem(API_KEY_NAME); } catch (x) {}
         showSetup('연결에 실패했습니다: ' + e.message + ' — 주소와 배포 설정(액세스: 모든 사용자)을 확인해 주세요.');
       });
-    }
-    function copyApiUrl() {
-      const u = apiUrl(), link = document.getElementById('copyApiLink');
-      const done = function (msg) { if (link) { link.textContent = msg; setTimeout(function () { link.textContent = '연결 주소 복사'; }, 2000); } };
-      if (!u) { done('저장된 주소 없음'); return; }
-      const fallback = function () {
-        try {
-          const t = document.createElement('textarea'); t.value = u; t.style.position = 'fixed'; t.style.opacity = '0';
-          document.body.appendChild(t); t.select(); const ok = document.execCommand('copy'); document.body.removeChild(t);
-          done(ok ? '복사됨 ✓' : '복사 실패');
-        } catch (e) { done('복사 실패'); }
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(u).then(function () { done('복사됨 ✓'); }, fallback);
-      else fallback();
     }
     function resetSetup() {
       if (!confirm("이 휴대폰에 저장된 연결 주소를 지우고 다시 설정할까요?\n(출석 기록은 지워지지 않습니다)")) return;

@@ -1,0 +1,32 @@
+name: 좌표 보충 시험(개발)
+
+on:
+  push:
+    branches: [geo-dev]
+    paths: [probe.py, geo.py, .github/workflows/geo-dev.yml]
+
+permissions:
+  contents: write
+
+concurrency: geo-dev
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 시험
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+        run: python probe.py
+      - name: 결과 올리기(개발 브랜치)
+        run: |
+          git config user.name "crowdmap-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add probe_out
+          git diff --cached --quiet || git commit -m "probe $(date -u +%FT%H%M)"
+          git push

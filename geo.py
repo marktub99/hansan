@@ -119,20 +119,22 @@ def aliases(name, rw):
     main = _par.sub(" ", base).strip()
     out = []
 
-    def add(s, is_main):
+    def add(s, is_main, whole=False):
         s = s.strip()
         if not s:
             return
         toks = s.split()
         if len(toks) > 1 and nk(toks[0]) in rw:          # '충주 탄금대' -> '탄금대'도 별칭
-            add(" ".join(toks[1:]), is_main)
+            add(" ".join(toks[1:]), is_main, whole)
         n = nk(s)
-        if len(n) < 2 or n in rw or n in GENERIC or (not is_main and (len(n) < 3 or GENERIC_TAIL.search(n))):
+        if len(n) < 2 or n in rw or n in GENERIC:
+            return
+        if not whole and (len(n) < 3 or GENERIC_TAIL.search(n)):   # 조각 이름('창고' 등)은 3글자 이상만
             return
         if all(n != o[0] for o in out):
             out.append((n, is_main))
 
-    add(main, True)
+    add(main, True, True)
     for part in _split.split(main):
         add(part, True)
     for p in inner:

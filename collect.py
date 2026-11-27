@@ -19,6 +19,8 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
+import geo
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 KEY = os.environ.get("DATA_GO_KR_KEY", "").strip()
 BASE = "https://apis.data.go.kr/B551011"
@@ -242,6 +244,12 @@ def match_one(name, area, sgname, local, sido_index):
 
 
 # ---------- 수집 ----------
+def place_lc(it):
+    """법정동 시군구 코드 5자리(세종은 시도 코드가 이미 5자리)"""
+    r, s = str(it.get("lDongRegnCd") or ""), str(it.get("lDongSignguCd") or "")
+    return r if len(r) == 5 else (r + s if r and s else "")
+
+
 def load_places():
     """전국 관광정보 목록(약 5만 건)."""
     items = fetch_all("kor", "KorService2/areaBasedList2", {"arrange": "C"}, 1000)
@@ -259,7 +267,7 @@ def load_places():
         places.append({"title": title, "nk": norm_keep(title), "n": norm(title),
                        "addr": (it.get("addr1") or "").strip(), "x": x, "y": y,
                        "t": str(it.get("contenttypeid") or ""), "l3": it.get("lclsSystm3") or "",
-                       "id": str(it.get("contentid") or "")})
+                       "id": str(it.get("contentid") or ""), "lc": place_lc(it)})
     return places
 
 
@@ -487,18 +495,23 @@ def main():
                 sido_index.setdefault((area, p["nk"]), []).append(p)
 
     days = sorted({d for v in rates.values() for s in v.values() for d in s})[:31]
-    spots, unmatched, how = [], [], {}
+    spots, how, fixes = [], {}, {}
+    pend = []          # 좌표를 못 찾은 곳(+예전에 자동 보충한 곳): 4단계에서 공공 자료로 다시 찾는다
     for (area, sg), by_name in sorted(rates.items()):
         sgname = sgnames[(area, sg)]
-        local = [p for p in places if in_sigungu(p["addr"], area, sgname)]
+        alias = set(geo.REGION_ALIAS.get(str(sg), ()))   # 행정구역 개편으로 새 법정동 코드를 쓰는 곳(인천·화성)
+        local = [p for p in places if in_sigungu(p["addr"], area, sgname) or (alias and p["lc"] in alias)]
         label = (SIDO_SHORT.get(area, "") + " " + sgname).strip() if area != 36 else "세종"
-        cx = sum(p["x"] for p in local) / len(local) if local else None
-        cy = sum(p["y"] for p in local) / len(local) if local else None
+        center = (round(sum(p["y"] for p in local) / len(local), 5),
+                  round(sum(p["x"] for p in local) / len(local), 5)) if local else None
         for name, series in sorted(by_name.items()):
+            key = "%s|%s" % (sg, name)
             r = [None if series.get(d) is None else int(round(series[d])) for d in days]
-            ov = overrides.get("%s|%s" % (sg, name))
+            ov = overrides.get(key)
             rec = None
             fix = ov if isinstance(ov, dict) else None      # {"유형": ..., "장소": ...} : 분류만 바로잡기
+            if fix:
+                fixes[key] = fix
             if isinstance(ov, list) and len(ov) >= 2:
                 io = IO_WORD.get(ov[2], IO_UNKNOWN) if len(ov) > 2 else IO_UNKNOWN
                 old_s = prev.get((sg, name))
@@ -515,16 +528,18 @@ def main():
                 o = prev[(sg, name)]           # 어제 찾아 둔 좌표 재사용
                 rec = [name, label, o[2], o[3], o[4], o[5], o[6], r, o[8], sg]
                 how["prev"] = how.get("prev", 0) + 1
+                if str(o[8]).startswith("geo:"):  # 자동 보충했던 곳은 오늘 근거로 다시 확인
+                    pend.append({"rec": rec, "key": key, "sg": sg, "name": name, "label": label,
+                                 "center": center, "r": r, "geo": True})
             if rec is None:
-                unmatched.append("%s|%s  (%s)" % (sg, name, label))
-                if cx is None:
-                    continue                    # 시군구 위치조차 모르면 지도에 못 올린다
-                rec = [name, label, round(cy, 5), round(cx, 5), 8, IO_UNKNOWN, 1, r, "", sg]
+                if center:
+                    rec = [name, label, center[0], center[1], 8, IO_UNKNOWN, 1, r, "", sg]
+                pend.append({"rec": rec, "key": key, "sg": sg, "name": name, "label": label,
+                             "center": center, "r": r, "geo": False})
+                if rec is None:
+                    continue                    # 시군구 위치조차 모르면 좌표를 찾았을 때만 올린다
             if fix:
-                if fix.get("유형") in GROUPS:
-                    rec[4] = GROUPS.index(fix["유형"])
-                if fix.get("장소") in IO_WORD:
-                    rec[5] = IO_WORD[fix["장소"]]
+                apply_fix(rec, fix)
                 how["fix"] = how.get("fix", 0) + 1
             spots.append(rec)
 
@@ -534,9 +549,43 @@ def main():
     except Exception as e:
         log("   실패:", e); hub, hub_ym = {}, ""
     ranked, filled = apply_hub(spots, hub)
-    unmatched = [u for u in unmatched if not any(
-        (not s[6]) and u.startswith("%s|%s  " % (s[9], s[0])) for s in spots)] if filled else unmatched
     log("   기준월 %s, 순위 붙은 장소 %d곳, 좌표 보충 %d곳, 호출 %d건" % (hub_ym or "-", ranked, filled, calls["hub"]))
+
+    log("4) 좌표 보충(관광공사 목록 다시 맞추기·중심 관광지·국가유산청)")
+    n_geo = n_review = n_auto = 0
+    todo = [q for q in pend if q["rec"] is None or q["rec"][6] or q["geo"]]
+    if places and todo:
+        ids = {}
+        for s in spots:
+            if not s[6] and s[8] and not str(s[8]).startswith("geo:"):
+                ids.setdefault(str(s[9]), []).append(str(s[8]))
+        try:
+            finder = geo.Finder(places, hub, sigungu, ids)
+            res, n_review, n_auto = geo.resolve([(str(q["sg"]), q["name"], q["label"]) for q in todo],
+                                                finder, HERE, log)
+        except Exception as e:                  # 보충이 실패해도 수집 결과는 저장한다
+            log("   실패:", type(e).__name__)
+            res, finder = None, None
+        for q in todo if res is not None else []:
+            a, rec = res.get(q["key"]), q["rec"]
+            if a:
+                if rec is None:
+                    rec = q["rec"] = [q["name"], q["label"], 0, 0, 8, IO_UNKNOWN, 1, q["r"], "", q["sg"], 0, 0]
+                    spots.append(rec)
+                rec[2], rec[3] = round(float(a["lat"]), 5), round(float(a["lng"]), 5)
+                rec[4], rec[5] = geo_kind(a, finder, str(q["sg"]))
+                rec[6], rec[8] = 0, "geo:%s:%s" % (a["src"], a["id"])
+                n_geo += 1
+            elif q["geo"] and rec is not None and q["center"]:
+                # 예전에 자동으로 넣은 좌표인데 이제 근거가 없음(확인 목록에서 X 등) -> 대략 위치로 되돌림
+                rec[2], rec[3], rec[4], rec[5], rec[6], rec[8] = q["center"][0], q["center"][1], 8, IO_UNKNOWN, 1, ""
+            else:
+                continue
+            if q["key"] in fixes:
+                apply_fix(rec, fixes[q["key"]])
+        log("   대상 %d곳 -> 좌표 보충 %d곳(자동 %d, 확인함 %d), 확인 대기 %d곳"
+            % (len(todo), n_geo, n_auto, n_geo - n_auto, n_review))
+    unmatched = ["%s|%s  (%s)" % (q["sg"], q["name"], q["label"]) for q in pend if q["rec"] is None or q["rec"][6]]
 
     exact = len(spots) - sum(1 for s in spots if s[6])
     data = {
@@ -545,19 +594,101 @@ def main():
         "groups": GROUPS,
         "stats": {"total": n_spots, "placed": exact, "approx": len(spots) - exact,
                   "dropped": n_spots - len(spots), "failedRegions": len(failed),
-                  "ranked": ranked, "hubYm": hub_ym},
+                  "ranked": ranked, "hubYm": hub_ym, "geo": n_geo, "review": n_review},
         "spots": spots,
     }
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
-    with open(os.path.join(HERE, "unmatched.txt"), "w", encoding="utf-8") as f:
-        f.write("# 위치를 자동으로 못 찾은 관광지 (시군구코드|관광지명). overrides.json 에 직접 넣을 수 있음\n")
-        f.write("\n".join(unmatched) + "\n")
-    log("4) 저장 완료: 전체 %d곳 / 위치 확정 %d곳 / 대략 위치 %d곳 / 제외 %d곳"
+    save(data, unmatched)
+    log("5) 저장 완료: 전체 %d곳 / 위치 확정 %d곳 / 대략 위치 %d곳 / 제외 %d곳"
         % (n_spots, exact, len(spots) - exact, n_spots - len(spots)))
     log("   맞춘 방식:", how)
     return 0
 
 
+def apply_fix(rec, fix):
+    if fix.get("유형") in GROUPS:
+        rec[4] = GROUPS.index(fix["유형"])
+    if fix.get("장소") in IO_WORD:
+        rec[5] = IO_WORD[fix["장소"]]
+
+
+def geo_kind(a, finder, sg):
+    """보충한 좌표의 출처로 유형·실내외를 정한다."""
+    src = a.get("src")
+    if src == "kor":
+        t, l3 = a.get("t") or "", a.get("l3") or ""
+        if not (t or l3) and finder:
+            p = finder.by_id.get(str(a.get("id")))
+            if p:
+                t, l3 = p.get("t") or "", p.get("l3") or ""
+        return group_of(l3, t), io_of(l3, t)
+    if src == "hub":
+        m = a.get("mcls") or ""
+        if not m and finder:
+            m = next((h["mcls"] for h in finder.hub.get(sg, ()) if h["title"] == a.get("id")), "")
+        return HUB_GROUP.get(m, 8), IO_UNKNOWN
+    if src == "khs":
+        return 1, IO_UNKNOWN
+    return 8, IO_UNKNOWN
+
+
+def save(data, unmatched):
+    with open(os.path.join(HERE, "data.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+    with open(os.path.join(HERE, "unmatched.txt"), "w", encoding="utf-8") as f:
+        f.write("# 위치를 자동으로 못 찾은 관광지 (시군구코드|관광지명). overrides.json 에 직접 넣거나, "
+                "geo_review.md 의 후보를 O 로 표시할 수 있음\n")
+        f.write("\n".join(unmatched) + "\n")
+
+
+def review_only():
+    """사람이 고친 overrides.json·geo_review.md 를 지금 data.json 에 바로 반영한다(API 호출 없음)."""
+    try:
+        data = json.load(open(os.path.join(HERE, "data.json"), encoding="utf-8"))
+    except Exception:
+        log("data.json 이 없어 건너뜁니다."); return 0
+    try:
+        overrides = json.load(open(os.path.join(HERE, "overrides.json"), encoding="utf-8"))
+    except Exception as e:
+        log("overrides.json 을 읽지 못했습니다(쉼표·따옴표 확인):", type(e).__name__); overrides = {}
+    spots = data["spots"]
+    keys = {"%s|%s" % (s[9], s[0]) for s in spots}
+    decisions, store = geo.refresh_review(HERE, keys)
+    wait = store["확인대기"]
+    n_ov = n_ok = 0
+    for s in spots:
+        key = "%s|%s" % (s[9], s[0])
+        ov = overrides.get(key)
+        if isinstance(ov, list) and len(ov) >= 2:
+            s[2], s[3], s[6], s[8] = round(float(ov[0]), 5), round(float(ov[1]), 5), 0, ""
+            if len(ov) > 2:
+                s[5] = IO_WORD.get(ov[2], IO_UNKNOWN)
+            n_ov += 1
+        elif s[6]:
+            ok = [d for d in decisions.get(key, []) if d[0] == "O"]
+            if ok:
+                _, src, cid, lat, lng = ok[0]
+                meta = wait.get(key) or {}
+                a = {"src": src, "id": cid, "t": meta.get("t"), "l3": meta.get("l3"), "mcls": meta.get("mcls")}
+                s[2], s[3], s[6], s[8] = round(lat, 5), round(lng, 5), 0, "geo:%s:%s" % (src, cid)
+                s[4], s[5] = geo_kind(a, None, str(s[9]))
+                n_ok += 1
+        if isinstance(ov, dict):
+            apply_fix(s, ov)
+    placed = {"%s|%s" % (s[9], s[0]) for s in spots if not s[6]}
+    try:
+        lines = [ln.rstrip("\n") for ln in open(os.path.join(HERE, "unmatched.txt"), encoding="utf-8")
+                 if ln.strip() and not ln.startswith("#")]
+    except Exception:
+        lines = []
+    unmatched = [ln for ln in lines if ln.split("  (")[0] not in placed]
+    st = data.get("stats", {})
+    st["placed"] = len(spots) - sum(1 for s in spots if s[6])
+    st["approx"] = len(spots) - st["placed"]
+    st["review"] = sum(1 for k in wait if k in keys and not any(d[0] in "OX" for d in decisions.get(k, [])))
+    save(data, unmatched)
+    log("직접 고친 내용 반영: overrides 좌표 %d곳, 확인 목록 O %d곳, 확인 대기 %d곳" % (n_ov, n_ok, st["review"]))
+    return 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(review_only() if "--review" in sys.argv else main())

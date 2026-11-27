@@ -193,6 +193,7 @@
     색 구간(39·69·84)은 이 화면에서 임의로 정한 기준입니다.
     실내·실외는 장소 유형으로 미루어 정한 값이어서 개별 장소와 다를 수 있습니다.
     '위치 대략' 표시는 정확한 좌표를 찾지 못해 시군구 중심 부근에 놓은 장소입니다.
+    위치 일부는 한국관광공사·국가유산청 공개 자료에서 이름이 같은 곳을 찾아 보충했습니다.
     '거점 순위'는 한국관광공사 「기초지자체 중심 관광지 정보」를 바탕으로 한 시군구별 순위(다른 관광지와 많이 연결되는 정도)이며, 방문객 수나 평점이 아닙니다. 시장·백화점은 빼고 매겼고, 유형에서 '쇼핑·시장'을 켜면 쇼핑끼리의 순위가 보입니다.
     <span id="stats"></span>
   </p>
@@ -689,6 +690,13 @@
     document.getElementById('stats').textContent = '전체 ' + (st.total || d.spots.length) + '곳 중 위치 확정 ' +
       (st.placed || 0) + '곳, 대략 위치 ' + (st.approx || 0) + '곳' + (st.dropped ? ', 제외 ' + st.dropped + '곳' : '') +
       (st.ranked ? ', 거점 순위 ' + st.ranked + '곳(' + st.hubYm + ' 기준)' : '') + '.';
+    if (st.review > 0) {   // 이름이 애매해 사람이 확인할 후보(GitHub의 확인 목록 파일)
+      var rv = document.createElement('a');
+      rv.href = 'https://github.com/marktub99/hansan/blob/main/geo_review.md';
+      rv.target = '_blank'; rv.rel = 'noopener';
+      rv.textContent = ' 좌표 확인 대기 ' + st.review + '곳 →';
+      document.getElementById('stats').appendChild(rv);
+    }
 
     var sel = document.getElementById('day');
     d.days.forEach(function (iso, i) {

@@ -1,57 +1,32 @@
 # -*- coding: utf-8 -*-
-"""좌표 보충 설계용 시험 2: 국가유산청 목록(키 없음)을 시도별로 받아 본다. geo-dev 전용."""
-import gzip, json, os, re, time, urllib.parse, urllib.request
-import xml.etree.ElementTree as ET
+"""geo-dev 전용 시험 3: 새 collect.py 전체 흐름을 실제 관광공사 목록·국가유산청으로 돌려 본다.
+혼잡도는 다시 받지 않고(호출 아끼기) 지금 data.json·unmatched.txt 에서 되살린다. 결과는 probe_out/test 에만 남긴다."""
+import json, os, shutil, sys
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+os.environ["FORCE"] = "1"
+import collect as C
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "probe_out")
-os.makedirs(OUT, exist_ok=True)
-URL = "https://www.khs.go.kr/cha/SearchKindOpenapiList.do?"
-FIELDS = ("ccbaKdcd", "ccbaAsno", "ccbaCtcd", "ccmaName", "ccbaMnm1", "ccbaCtcdNm", "ccsiName",
-          "ccbaCncl", "longitude", "latitude", "ccbaAdmin")
-
-
-def get(params):
-    req = urllib.request.Request(URL + urllib.parse.urlencode(params), headers={"User-Agent": "Mozilla/5.0 crowdmap"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return r.read().decode("utf-8", "replace")
-
-
-calls, rows, info = 0, [], {}
-for ctcd in ["11", "21", "22", "23", "24", "25", "26", "45", "31", "32", "33", "34", "35", "36", "37", "38", "50"]:
-    page, got, total = 1, 0, None
-    while True:
-        try:
-            raw = get({"ccbaCtcd": ctcd, "pageUnit": 1000, "pageIndex": page})
-        except Exception as e:
-            info[ctcd] = {"err": type(e).__name__, "page": page}
-            break
-        calls += 1
-        root = ET.fromstring(raw)
-        total = int(root.findtext("totalCnt") or 0)
-        items = root.findall("item")
-        for it in items:
-            rows.append({f: (it.findtext(f) or "").strip() for f in FIELDS})
-        got += len(items)
-        if not items or got >= total or page >= 15:
-            break
-        page += 1
-        time.sleep(0.5)
-    info.setdefault(ctcd, {"total": total, "got": got, "pages": page})
-    print("국가유산청", ctcd, info[ctcd], flush=True)
-    time.sleep(0.5)
-with gzip.open(os.path.join(OUT, "khs.json.gz"), "wt", encoding="utf-8") as f:
-    json.dump(rows, f, ensure_ascii=False)
-# 이름 검색 방식 확인(띄어쓰기)
-test = {}
-for q in ["경운동민병옥가옥", "민병옥", "가학동지석묘", "가학동 지석묘"]:
-    try:
-        raw = get({"ccbaMnm1": q, "pageUnit": 5})
-        calls += 1
-        root = ET.fromstring(raw)
-        test[q] = [int(root.findtext("totalCnt") or 0)] + [it.findtext("ccbaMnm1") for it in root.findall("item")]
-    except Exception as e:
-        test[q] = type(e).__name__
-    time.sleep(0.5)
-json.dump({"info": info, "test": test}, open(os.path.join(OUT, "khs_info.json"), "w", encoding="utf-8"), ensure_ascii=False)
-print("이름 검색:", test, flush=True)
-print("끝. 호출", calls, "건, 항목", len(rows), "건", flush=True)
+d0 = json.load(open(os.path.join(HERE, "data.json"), encoding="utf-8"))
+days = [x.replace("-", "") for x in d0["days"]]
+rows = {r[2]: r for r in json.load(open(os.path.join(HERE, "sigungu.json"), encoding="utf-8"))}
+rates, names = {}, {}
+for s in d0["spots"]:
+    r = rows[s[9]]
+    rates.setdefault((r[0], r[2]), {})[s[0]] = {dd: v for dd, v in zip(days, s[7]) if v is not None}
+    names[(r[0], r[2])] = r[3]
+for ln in open(os.path.join(HERE, "unmatched.txt"), encoding="utf-8"):
+    if ln.startswith("#") or not ln.strip():
+        continue
+    sg, rest = ln.split("|", 1)
+    r = rows[int(sg)]
+    rates.setdefault((r[0], r[2]), {}).setdefault(rest.rsplit("  (", 1)[0], {days[0]: 50})
+    names[(r[0], r[2])] = r[3]
+C.load_rates = lambda sigungu: (rates, names, [])
+rc = C.main()
+out = os.path.join(HERE, "probe_out", "test")
+os.makedirs(out, exist_ok=True)
+for f in ("data.json", "unmatched.txt", "geo_auto.json", "geo_review.md"):
+    if os.path.exists(os.path.join(HERE, f)):
+        shutil.copy(os.path.join(HERE, f), out)
+print("끝 rc=%s" % rc, flush=True)

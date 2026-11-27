@@ -361,7 +361,7 @@ def load_auto(here):
         return {"적용": {}, "검색기록": {}, "확인대기": {}}
 
 
-_line = re.compile(r"^\s*[-*]?\s*([?？OoXx○ㅇ×])\s+(\d{5}\|.+?)\s+→\s.*`([a-z]+):([^@`]*)@(-?\d+\.\d+),(-?\d+\.\d+)`\s*$")
+_line = re.compile(r"^\s*[-*]?\s*([?？OoXx○ㅇ×ㅐㅌ])\s+(\d{5}\|.+?)\s+→\s.*`([a-z]+):([^@`]*)@(-?\d+\.\d+),(-?\d+\.\d+)`\s*$")
 
 
 def load_decisions(here):
@@ -375,7 +375,7 @@ def load_decisions(here):
         m = _line.match(ln)
         if m:
             mark = m.group(1)
-            mark = "O" if mark in "Oo○ㅇ" else ("X" if mark in "Xx×" else "?")
+            mark = "O" if mark in "Oo○ㅇㅐ" else ("X" if mark in "Xx×ㅌ" else "?")   # ㅐ·ㅌ: 한글 자판으로 O·X 를 누른 경우
             out.setdefault(m.group(2), []).append((mark, m.group(3), m.group(4), float(m.group(5)), float(m.group(6))))
     return out
 

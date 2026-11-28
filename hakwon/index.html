@@ -468,7 +468,8 @@
       }
       const last = days[days.length - 1], from = new Date(last); from.setDate(from.getDate() - 41);
       days = days.filter(function (d) { return d >= from; });
-      const weeks = Math.round((weekStart(last) - weekStart(days[0])) / 604800000) + 1;
+      // 방학 등으로 한 번도 안 간 주는 빼고, 실제로 다닌 주만으로 주당 횟수를 낸다
+      const weeks = Object.keys(days.reduce(function (o, d) { o[dayKey(weekStart(d))] = 1; return o; }, {})).length;
       let perWeek = Math.max(1, Math.min(7, Math.round(days.length / weeks)));
       const cnt = {}, lastSeen = {};
       days.forEach(function (d, i) { const w = d.getDay(); cnt[w] = (cnt[w] || 0) + 1; lastSeen[w] = i; });

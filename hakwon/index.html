@@ -244,6 +244,9 @@
       font-weight: bold;
       margin-bottom: 8px;
     }
+    .end-est { margin-top: 10px; font-size: 1rem; color: #334155; }
+    .end-est b { color: #4f46e5; }
+    .end-est span { display: block; font-size: 0.8rem; color: #94a3b8; margin-top: 2px; }
     .remain-warn.done { background: #fee2e2; color: #991b1b; border-color: #ef4444; }
   </style>
 </head>
@@ -442,6 +445,57 @@
       return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
     }
 
+    // ================= 예상 종료일 =================
+    // 같은 아이·같은 학원의 최근 6주 출석 기록(예전 수강권 포함)으로 "무슨 요일에, 주 몇 회" 다니는지 알아내고,
+    // 남은 회차를 그 요일에 하나씩 채워 마지막 날짜를 계산한다. 공휴일·결석·보강은 반영하지 못하므로 '경'으로 표시.
+    const WD = ['일', '월', '화', '수', '목', '금', '토'];
+    function ymd(str) {
+      const m = String(str || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+    }
+    function dayKey(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function weekStart(d) { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+    function classPattern(course) {
+      const key = course.childName + '|' + course.courseName, seen = {};
+      appData.forEach(function (c) {
+        if (c.childName + '|' + c.courseName !== key) return;
+        c.attendanceLogs.forEach(function (l) { const d = ymd(l); if (d) seen[dayKey(d)] = d; });
+      });
+      let days = Object.keys(seen).sort().map(function (k) { return seen[k]; });
+      if (!days.length) {
+        const s = ymd(course.startDate) || new Date();
+        return { weekdays: [s.getDay()], perWeek: 1, guess: true, none: true };
+      }
+      const last = days[days.length - 1], from = new Date(last); from.setDate(from.getDate() - 41);
+      days = days.filter(function (d) { return d >= from; });
+      const weeks = Math.round((weekStart(last) - weekStart(days[0])) / 604800000) + 1;
+      let perWeek = Math.max(1, Math.min(7, Math.round(days.length / weeks)));
+      const cnt = {}, lastSeen = {};
+      days.forEach(function (d, i) { const w = d.getDay(); cnt[w] = (cnt[w] || 0) + 1; lastSeen[w] = i; });
+      const wds = Object.keys(cnt).map(Number).sort(function (a, b) { return (cnt[b] - cnt[a]) || (lastSeen[b] - lastSeen[a]); });
+      perWeek = Math.min(perWeek, wds.length);
+      return { weekdays: wds.slice(0, perWeek), perWeek: perWeek, guess: days.length < 2 };
+    }
+    function expectedEnd(course) {
+      const remain = course.totalSessions - course.attendanceLogs.length;
+      if (remain <= 0) return null;
+      const p = classPattern(course), today = ymd(todayStr());
+      const logs = course.attendanceLogs, start = ymd(course.startDate);
+      let d = new Date(today);
+      if (logs.length && String(logs[logs.length - 1]).slice(0, 10) === todayStr()) d.setDate(d.getDate() + 1);   // 오늘은 이미 다녀옴
+      if (start && start > d) d = new Date(start);
+      let n = 0;
+      for (let i = 0; i < 800; i++, d.setDate(d.getDate() + 1)) {
+        if (p.weekdays.indexOf(d.getDay()) >= 0 && ++n === remain) break;
+      }
+      const order = function (w) { return (w + 6) % 7; };
+      const names = p.weekdays.slice().sort(function (a, b) { return order(a) - order(b); }).map(function (w) { return WD[w]; }).join('·');
+      return {
+        text: (d.getMonth() + 1) + '월 ' + d.getDate() + '일(' + WD[d.getDay()] + ')경',
+        basis: names + ' 주 ' + p.perWeek + '회 기준' + (p.none ? ' · 출석 기록이 없어 시작일 요일로 추정' : p.guess ? ' · 기록이 적어 추정' : '')
+      };
+    }
+
     function addCourse() {
       const childName = document.getElementById('childName').value.trim();
       const courseName = document.getElementById('courseName').value.trim();
@@ -546,6 +600,11 @@
               ? `<div class="remain-warn">⚠️ 잔여 ${remainCount}회 — 곧 재등록 시기입니다</div>`
               : '';
 
+            const end = expectedEnd(course);
+            const endHtml = end
+              ? `<div class="end-est">📅 예상 종료 <b>${esc(end.text)}</b><span>${esc(end.basis)}</span></div>`
+              : '';
+
             html += `
               <div class="card course-card">
                 <div>
@@ -565,6 +624,7 @@
                   <div class="progress-container">
                     <div class="progress-bar" style="width: ${percent}%;"></div>
                   </div>
+                  ${endHtml}
                   ${warnHtml}
                 </div>
 
